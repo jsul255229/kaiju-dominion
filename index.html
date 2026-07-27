@@ -351,7 +351,7 @@ const CITIES = [
     landmark: "diamondhead", landmarkName: "Diamond Head", time: "dusk", weather: "clear",
     lm2: [["alohatower", "Aloha Tower"], ["iolani", "\u02bbIolani Palace"],
           ["royalhawaiian", "The Royal Hawaiian"], ["arizona", "USS Arizona Memorial"]],
-    mil: "usa", vehicle: "jeep", bg: "honolulu" },
+    navy: true, mil: "usa", vehicle: "jeep", bg: "honolulu" },
   { name: "RIO DE JANEIRO", lat: -22.9, lon: -43.2, sub: "Copacabana", tint: "#ffd044", water: "Guanabara Bay",
     landmark: "christ", landmarkName: "Christ the Redeemer", time: "day", weather: "clear",
     lm2: [["maracana", "Maracanã Stadium"], ["lapa", "Arcos da Lapa"],
@@ -361,12 +361,12 @@ const CITIES = [
     landmark: "tablemtn", landmarkName: "Table Mountain", time: "day", weather: "clear",
     lm2: [["ctstadium", "Cape Town Stadium"], ["clocktower", "V&A Clock Tower"],
           ["bokaap", "Bo-Kaap"], ["goodhope", "Castle of Good Hope"]],
-    mil: "safrica", vehicle: "bakkie", bg: "capetown" },
+    navy: true, mil: "safrica", vehicle: "bakkie", bg: "capetown" },
   { name: "SYDNEY", lat: -33.9, lon: 151.2, sub: "Harbour Front", tint: "#44ddcc", water: "Sydney Harbour",
     landmark: "shells", landmarkName: "Sydney Opera House", time: "day", weather: "clear",
     lm2: [["sydtower", "Sydney Tower"], ["qvb", "Queen Victoria Building"],
           ["stmarys", "St Mary's Cathedral"], ["lunapark", "Luna Park"]],
-    mil: "aus", vehicle: "ute", bg: "sydney" },
+    navy: true, mil: "aus", vehicle: "ute", bg: "sydney" },
   { name: "CAIRO", lat: 30.0, lon: 31.2, sub: "Giza Plateau", tint: "#ffdd99", water: "The Nile",
     landmark: "giza", landmarkName: "Great Pyramid of Giza", time: "dawn", weather: "clear",
     lm2: [["sphinx", "The Great Sphinx"], ["cairotower", "Cairo Tower"],
@@ -386,7 +386,7 @@ const CITIES = [
     landmark: "gateway", landmarkName: "Gateway of India", time: "dusk", weather: "clear",
     lm2: [["cst", "Chhatrapati Shivaji Terminus"], ["tajpalace", "The Taj Mahal Palace"],
           ["rajabai", "Rajabai Clock Tower"], ["antilia", "Antilia"]],
-    mil: "india", vehicle: "rickshaw", bg: "mumbai" },
+    navy: true, mil: "india", vehicle: "rickshaw", bg: "mumbai" },
   { name: "SAN FRANCISCO", lat: 37.8, lon: -122.4, sub: "Embarcadero", tint: "#ff8866", water: "The Bay",
     landmark: "pyramid", landmarkName: "Transamerica Pyramid", time: "dawn", weather: "fog",
     lm2: [["coit", "Coit Tower"], ["ferry", "Ferry Building"],
@@ -803,6 +803,7 @@ let killCam = null;                                     // slow-mo cam on final 
 let evt = null, evtTimer = 12;                          // mid-level events
 let levelTime = 0, landmarkFirstBonus = false;
 let craters = [], aberrT = 0, introT = 0, crowdT = 2;
+let quakes = [], fireCount = 0, firestormAlerted = false, navyAlerted = false, navyT = 7;
 let pauseSel = 0, confirmWipe = false;                   // in-game pause menu
 let settingsSel = 0, settingsFrom = 0, settingsBtns = []; // settings screen state
 const OPT_ROWS = [
@@ -1104,6 +1105,7 @@ function resetLevel() {
   killCam = null;
   evt = null; evtTimer = 10 + Math.random() * 8;
   nukedThisLevel = false;
+  quakes = []; fireCount = 0; firestormAlerted = false; navyAlerted = false; navyT = 7;
   craters = [];
   levelTime = 0; landmarkFirstBonus = false;
   combo = 0; comboT = 0;
@@ -1637,6 +1639,35 @@ function update(dt) {
       setTimeout(() => snd(500 + Math.random() * 250, 0.16, "triangle", 0.035, -200), 130);
     }
   }
+  // ----- fire census + quake waves -----
+  fireCount = 0;
+  for (const b2 of buildings) if (b2.burn > 0 && !b2.rubble) fireCount++;
+  if (fireCount >= 8 && !firestormAlerted) {
+    firestormAlerted = true;
+    newsAlert("FIRESTORM SPREADING THROUGH " + CITIES[cityIdx].name, 3);
+  }
+  for (let qi = quakes.length - 1; qi >= 0; qi--) {
+    const q = quakes[qi];
+    q.r += 330 * dt;
+    if (q.r > q.max) { quakes.splice(qi, 1); continue; }
+    const fall = 1 - q.r / q.max;                        // weakens with distance
+    for (const sgn of [-1, 1]) {
+      const fx = q.x + sgn * q.r;
+      if (Math.random() < dt * 14)                       // dust at the wavefront
+        particles.push({ x: fx + (Math.random() - 0.5) * 22, y: GROUND - 4,
+                         vx: (Math.random() - 0.5) * 40, vy: -30 - Math.random() * 40,
+                         life: 0.5, color: "smoke", grav: -18 });
+      for (const b2 of buildings) {
+        if (b2.rubble || b2.falling) continue;
+        if (Math.abs(b2.x + b2.w / 2 - fx) < 32)
+          b2.hp -= q.power * dt * 6 * fall * (b2.landmark ? 0.45 : 1);
+      }
+      for (const u of units)
+        if (u.kind === "tank" && Math.abs(u.x - fx) < 34 && Math.random() < dt * 4) damageUnit(u, 1);
+      for (const c of civilians)
+        if (!c.dead && Math.abs(c.x - fx) < 60) c.panic = true;
+    }
+  }
 
   // melee combo chain: 1) claw slash  2) rising backhand  3) spinning tail sweep
   // — or grab a low helicopter / rubble chunk, press again to hurl
@@ -1809,6 +1840,9 @@ function update(dt) {
     hitBuildings(k.x, 130 * smash, meleeP() * 0.65);
     craters.push({ x: k.x, r: 48 * smash });
     if (craters.length > 14) craters.shift();
+    // the shock rolls outward through the block as a quake wave
+    quakes.push({ x: k.x, r: 60, max: 400 * smash, power: meleeP() * 0.09 });
+    if (quakes.length > 4) quakes.shift();
     for (const u of units) {
       if (u.kind === "tank" && Math.abs(u.x - k.x) < 160 * smash) damageUnit(u, 3);
     }
@@ -1960,14 +1994,31 @@ function update(dt) {
     if (b.burn > 0) {
       b.burn -= dt;
       if (Math.random() < dt * 6) smoke(b.x + b.w / 2, GROUND - b.h, 1);
-      b.hp -= dt * 6;
+      if (Math.random() < dt * 2.5)                      // drifting embers
+        particles.push({ x: b.x + Math.random() * b.w, y: GROUND - b.h * Math.random(),
+                         vx: (Math.random() - 0.5) * 30, vy: -40 - Math.random() * 50,
+                         life: 0.7, color: "#ffb04a", grav: -30 });
+      b.hp -= dt * 7 * (b.landmark ? 0.45 : 1);          // fire eats the structure
+      // fire jumps to neighbours — capped so a city burns block by block, not all at once
+      if (fireCount < 24 && Math.random() < dt * 0.5) {
+        const cxb = b.x + b.w / 2;
+        for (const nb of buildings) {
+          if (nb === b || nb.rubble || nb.burn > 0) continue;
+          if (Math.abs(nb.x + nb.w / 2 - cxb) < (b.w + nb.w) / 2 + 55) {
+            nb.burn = 4 + Math.random() * 2.5;
+            fireCount++;
+            smoke(nb.x + nb.w / 2, GROUND - nb.h, 2);
+            break;                                       // one jump per roll
+          }
+        }
+      }
     }
     if (!b.rubble && !b.falling && b.hp <= 0) {
       // ----- randomized destruction physics -----
       // landmarks & squat buildings burst; towers pick a random dramatic death
       const tall = b.h > b.w * 1.4 && !b.landmark;
       const roll = Math.random();
-      if (tall && roll < 0.28) {
+      if (tall && roll < (b.burn > 0 ? 0.5 : 0.28)) {
         // TOPPLE: tips over sideways — falls away from the kaiju into its neighbors
         b.falling = { mode: "topple", t: 0, dur: 0.9, dir: (b.x + b.w / 2) > k.x ? 1 : -1 };
         sfx.crack ? sfx.crack() : sfx.boom();
@@ -2152,6 +2203,28 @@ function update(dt) {
   // ----- army spawning & AI -----
   spawnTimer -= dt;
   const maxUnits = Math.max(2, Math.round((4 + Math.floor(destroyedPct * 8) + cityIdx + ngPlus * 2) * DIF().units));
+  // coastal cities: the navy keeps its own timetable — it doesn't wait for
+  // room in the ground-force cap
+  if (CITIES[cityIdx].navy && destroyedPct > 0.16) {   // gate on live destruction, not stale armyLevel
+    navyT -= dt;
+    if (navyT <= 0) {
+      navyT = 12 + Math.random() * 8;
+      const nDest = units.filter(u => u.kind === "destroyer").length;
+      const nCarr = units.filter(u => u.kind === "carrier").length;
+      if (nDest < 2 || nCarr < 1) {
+        const side = Math.random() < 0.5 ? 0 : 1;
+        const sx = side ? worldW - 140 - Math.random() * 120 : 140 + Math.random() * 120;
+        if (!navyAlerted) { navyAlerted = true; newsAlert("NAVAL TASK FORCE ON STATION OFFSHORE", 2); }
+        if (nCarr < 1 && (nDest >= 2 || Math.random() < 0.35)) {
+          units.push({ kind: "carrier", x: sx, y: 0, w: 130, h: 34, vx: 0, hp: 14,
+                       fireT: 4, jetT: 3, dir: sx > worldW / 2 ? -1 : 1, bobT: Math.random() * 6 });
+        } else {
+          units.push({ kind: "destroyer", x: sx, y: 0, w: 90, h: 26, vx: 0, hp: 8,
+                       fireT: 2.5, dir: sx > worldW / 2 ? -1 : 1, bobT: Math.random() * 6 });
+        }
+      }
+    }
+  }
   if (spawnTimer <= 0 && units.length < maxUnits) {
     spawnUnit();
     spawnTimer = Math.max(0.6, (3 - destroyedPct * 2.5 - cityIdx * 0.2 - ngPlus * 0.35) * DIF().spawn);
@@ -2193,6 +2266,7 @@ function update(dt) {
         eBullets.push({ x: u.x, y: u.y, vx: Math.cos(a) * 260, vy: Math.sin(a) * 260, grav: 0, dmg: 3, kind: "rocket" });
       }
     } else if (u.kind === "jet") {
+      u.age = (u.age || 0) + dt;
       u.x += u.vx * dt;
       if (!u.dropped && Math.abs(u.x - k.x) < 90) {
         u.dropped = true;
@@ -2208,6 +2282,37 @@ function update(dt) {
         sfx.tank();
         const t = 1.6; // flight time
         eBullets.push({ x: u.x, y: GROUND - 12, vx: dist / t, vy: -260, grav: 330, dmg: 6, bomb: true, kind: "heshell" });
+      }
+    } else if (u.kind === "destroyer") {
+      // holds station in the shallows, lobbing shells the length of the city
+      u.bobT += dt;
+      u.fireT -= dt;
+      if (u.fireT <= 0 && Math.abs(k.x - u.x) < 1500) {
+        u.fireT = 3.6 + Math.random() * 1.5;
+        sfx.tank();
+        for (let s2 = 0; s2 < 2; s2++) {
+          const t2 = 1.7 + s2 * 0.14;
+          const dist2 = (k.x + (Math.random() - 0.5) * 130) - u.x;
+          setTimeout(() => { if (state === S.PLAY) {
+            eBullets.push({ x: u.x, y: GROUND - 22, vx: dist2 / t2, vy: -330, grav: 330, dmg: 6, bomb: true, kind: "heshell" }); } }, s2 * 220);
+        }
+      }
+    } else if (u.kind === "carrier") {
+      // the flat-top: scrambles strike jets, shells when the deck is clear
+      u.bobT += dt;
+      u.jetT -= dt;
+      u.fireT -= dt;
+      if (u.jetT <= 0 && units.filter(x2 => x2.kind === "jet").length < 4) {
+        u.jetT = 6.5 + Math.random() * 2;
+        const d2 = k.x > u.x ? 1 : -1;
+        units.push({ kind: "jet", v: milOf().jets[0], x: u.x + d2 * 40, y: 64 + Math.random() * 40,
+                     vx: d2 * 240, hp: 3, fireT: 0.5, dir: d2, dropped: false });
+        boom(u.x + d2 * 50, GROUND - 40, "#cfe0ea", 6, 60, 0);
+      }
+      if (u.fireT <= 0 && Math.abs(k.x - u.x) < 1500) {
+        u.fireT = 5 + Math.random() * 2;
+        const t2 = 1.8, dist2 = k.x - u.x;
+        eBullets.push({ x: u.x, y: GROUND - 30, vx: dist2 / t2, vy: -340, grav: 330, dmg: 7, bomb: true, kind: "heshell" });
       }
     } else if (u.kind === "mlrs") {
       // rocket artillery: rolls to standoff range, then ripple-fires a salvo
@@ -2251,7 +2356,8 @@ function update(dt) {
       if (u.beamT > 0) u.beamT -= dt;
     }
   }
-  units = units.filter(u => u.hp > 0 && u.x > camX - 200 && u.x < camX + W + 200 || u.kind !== "jet" && u.hp > 0);
+  units = units.filter(u =>
+    u.hp > 0 && (u.kind !== "jet" || (u.age || 0) < 9 || (u.x > camX - 200 && u.x < camX + W + 200)));
 
   // ----- civilians & cars -----
   for (const c of civilians) {
@@ -2295,7 +2401,12 @@ function update(dt) {
     }
     if (b.y >= GROUND) { b.dead = true; boom(b.x, GROUND, "#ff8844", b.bomb ? 18 : 6, b.bomb ? 140 : 60); if (b.bomb) { sfx.boom(); shake = Math.max(shake, 6); } }
   }
-  eBullets = eBullets.filter(b => !b.dead && b.x > camX - 100 && b.x < camX + W + 100);
+  // arcing ordnance (naval and artillery shells) may legitimately fly in from
+  // far off-screen — cull those against the world, everything else against the camera
+  eBullets = eBullets.filter(b => !b.dead &&
+    (b.kind === "heshell" || b.kind === "missile"
+      ? b.x > -300 && b.x < worldW + 300
+      : b.x > camX - 100 && b.x < camX + W + 100));
 
   // ----- thrown helicopters -----
   for (const t of kBullets) {
@@ -2761,9 +2872,9 @@ function damageUnit(u, dmg) {
     stats.units++;
     if (stats.units === 10) pushNews("armed forces taking heavy losses · reinforcements requested");
     if (stats.units === 25) pushNews("general retreat ordered — the creature cannot be stopped");
-    const ptsMap = { tank: 300, heli: 500, jet: 800, arty: 600, ship: 2500, walker: 4000 };
+    const ptsMap = { tank: 300, heli: 500, jet: 800, arty: 600, mlrs: 2500, destroyer: 1800, carrier: 3200, walker: 4000 };
     const pts = ptsMap[u.kind] || 300;
-    const uy = (u.kind === "tank" || u.kind === "arty" || u.kind === "mlrs" || u.kind === "walker") ? GROUND - 24 : u.y;
+    const uy = (u.kind === "heli" || u.kind === "jet") ? u.y : GROUND - 24;
     addScore(pts, u.x, uy - 10, "#ffdd44");
     kaiju.rage = Math.min(100, kaiju.rage + 6 * levelRageBonus());
     const vamp = mutRank("vamp");
@@ -3967,6 +4078,38 @@ function drawGroundStrip(city) {
     }
     ctx.fillStyle = "rgba(210,224,240,0.18)";     // slush over the road
     ctx.fillRect(camX - 50, GROUND + 8, W + 100, H - GROUND - 8);
+  }
+  // coastal cities: the city ends in open water at both edges
+  if (city.navy) {
+    for (const [x0, x1] of [[-80, 330], [worldW - 330, worldW + 80]]) {
+      if (x1 < camX - 60 || x0 > camX + W + 60) continue;
+      ctx.fillStyle = "#1d5f7e";
+      ctx.fillRect(x0, GROUND, x1 - x0, H - GROUND);
+      ctx.fillStyle = "#2b7c96";
+      ctx.fillRect(x0, GROUND, x1 - x0, 7);
+      ctx.fillStyle = "rgba(230,250,255,0.4)";           // surf at the seam
+      for (let i = 0; i < 4; i++) {
+        const ph = (performance.now() / (1100 + i * 300)) % 1;
+        ctx.fillRect(x0, GROUND + 3 + ph * 16 + i * 3, x1 - x0, 2);
+      }
+      // foam where the water meets the seawall
+      const seam = x0 < 0 ? x1 : x0;
+      ctx.fillStyle = "rgba(240,252,255,0.6)";
+      ctx.fillRect(seam - 3, GROUND, 6, 8);
+    }
+  }
+  // quake wavefronts ripple along the street
+  for (const q of quakes) {
+    for (const sgn of [-1, 1]) {
+      const fx = q.x + sgn * q.r;
+      if (fx < camX - 40 || fx > camX + W + 40) continue;
+      const a2 = 0.5 * (1 - q.r / q.max);
+      ctx.strokeStyle = "rgba(210,190,150," + a2 + ")";
+      ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.ellipse(fx, GROUND + 4, 20, 7, 0, Math.PI, 0); ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(fx, GROUND + 5, 34, 10, 0, Math.PI, 0); ctx.stroke();
+      ctx.lineWidth = 1;
+    }
   }
   // stomp craters (slow tanks)
   for (const c of craters) {
@@ -10503,6 +10646,55 @@ function drawUnits() {
       ctx.stroke(); ctx.lineWidth = 1;
       ctx.fillStyle = mil.flash;
       ctx.fillRect(u.x - 18, uy - 6, 4, 3);
+    } else if (u.kind === "destroyer" || u.kind === "carrier") {
+      const carrier = u.kind === "carrier";
+      const bob = Math.sin((u.bobT || 0) * 1.4) * 2;
+      const uy = GROUND - 4 + bob;
+      const L = carrier ? 62 : 44;
+      // wake + waterline
+      ctx.fillStyle = "rgba(230,250,255,0.35)";
+      ctx.beginPath(); ctx.ellipse(u.x, GROUND + 2, L + 12, 5, 0, 0, 7); ctx.fill();
+      // hull
+      ctx.fillStyle = carrier ? "#59626e" : "#66707c";
+      ctx.beginPath();
+      ctx.moveTo(u.x - L, uy - 12);
+      ctx.lineTo(u.x + L, uy - 12);
+      ctx.lineTo(u.x + L - 12, uy + 2);
+      ctx.lineTo(u.x - L + 10, uy + 2);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = "rgba(10,14,20,0.25)";
+      ctx.fillRect(u.x - L + 10, uy - 2, L * 2 - 22, 4);
+      if (carrier) {
+        // flat flight deck with parked airframes and the island
+        ctx.fillStyle = "#4c545e";
+        ctx.fillRect(u.x - L - 8, uy - 17, L * 2 + 16, 6);
+        ctx.strokeStyle = "rgba(230,235,240,0.5)";
+        for (let i = -2; i <= 2; i++) { ctx.beginPath(); ctx.moveTo(u.x + i * 24 - 8, uy - 14); ctx.lineTo(u.x + i * 24 + 8, uy - 14); ctx.stroke(); }
+        ctx.fillStyle = "#39414c";
+        ctx.fillRect(u.x + L * 0.35, uy - 30, 18, 13);      // island
+        ctx.fillRect(u.x + L * 0.35 + 6, uy - 36, 3, 6);    // mast
+        ctx.fillStyle = "#727c88";                          // parked jets
+        for (const px of [-L * 0.6, -L * 0.25, L * 0.05]) {
+          ctx.beginPath();
+          ctx.moveTo(u.x + px, uy - 18); ctx.lineTo(u.x + px + 10, uy - 20); ctx.lineTo(u.x + px, uy - 22);
+          ctx.closePath(); ctx.fill();
+        }
+      } else {
+        // destroyer: superstructure, radar mast, forward gun tracking the kaiju
+        ctx.fillStyle = "#57616d";
+        ctx.fillRect(u.x - 14, uy - 26, 30, 14);
+        ctx.fillRect(u.x + 18, uy - 20, 14, 8);
+        ctx.fillStyle = "#39414c";
+        ctx.fillRect(u.x - 2, uy - 34, 3, 9);
+        ctx.strokeStyle = "#39414c"; ctx.lineWidth = 3;
+        const aim = kaiju.x > u.x ? 1 : -1;
+        ctx.beginPath();
+        ctx.moveTo(u.x - L + 22, uy - 14);
+        ctx.lineTo(u.x - L + 22 + aim * 14, uy - 22);
+        ctx.stroke(); ctx.lineWidth = 1;
+        ctx.fillStyle = (milOf().flash || "#c02030");
+        ctx.fillRect(u.x + L - 22, uy - 10, 5, 3);
+      }
     } else if (u.kind === "mlrs") {
       // heavy multiple rocket launcher on an 8x8 truck chassis
       const uy = GROUND - 6;
@@ -11343,6 +11535,11 @@ function drawBroadcast(city) {
   }
   if (boss && boss.hp > 0) { ctx.fillStyle = "#ff4477"; ctx.fillRect(mapAt(boss.x) - 1.5, pY + 4, 3, 12); }
   if (rival && rival.hp > 0) { ctx.fillStyle = "#c060ff"; ctx.fillRect(mapAt(rival.x) - 1.5, pY + 4, 3, 12); }
+  for (const u of units) {                              // heavy threats worth broadcasting
+    if (u.kind !== "walker" && u.kind !== "mlrs" && u.kind !== "destroyer" && u.kind !== "carrier") continue;
+    ctx.fillStyle = u.kind === "destroyer" || u.kind === "carrier" ? "#6ab8e8" : "#ff8866";
+    ctx.fillRect(mapAt(u.x) - 1, pY + 6, 2, 9);
+  }
   if (evt) {                                            // event markers ride the top edge
     ctx.fillStyle = evt.kind === "airstrike" ? "#ff5544" : "#66eeff";
     if (evt.trucks) { for (const t of evt.trucks) if (!t.dead) ctx.fillRect(mapAt(t.x) - 1, pY, 2, 3); }
