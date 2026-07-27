@@ -826,7 +826,7 @@ let evt = null, evtTimer = 12;                          // mid-level events
 let levelTime = 0, landmarkFirstBonus = false;
 let craters = [], aberrT = 0, introT = 0, crowdT = 2;
 let quakes = [], fireCount = 0, firestormAlerted = false;
-let navFleet = { seen: false, strikes: 0, volley: 0, shotT: 0, cd: 0, flashT: 0 }, navMarks = [];
+let navFleet = { seen: false, strikes: 0, volley: 0, shotT: 0, cd: 0, flashT: 0, smokeT: 0, gun: 0 }, navMarks = [];
 let pauseSel = 0, confirmWipe = false;                   // in-game pause menu
 let settingsSel = 0, settingsFrom = 0, settingsBtns = []; // settings screen state
 const OPT_ROWS = [
@@ -1129,7 +1129,7 @@ function resetLevel() {
   evt = null; evtTimer = 10 + Math.random() * 8;
   nukedThisLevel = false;
   quakes = []; fireCount = 0; firestormAlerted = false;
-  navFleet = { seen: false, strikes: 0, volley: 0, shotT: 0, cd: 0, flashT: 0 }; navMarks = [];
+  navFleet = { seen: false, strikes: 0, volley: 0, shotT: 0, cd: 0, flashT: 0, smokeT: 0, gun: 0 }; navMarks = [];
   craters = [];
   levelTime = 0; landmarkFirstBonus = false;
   combo = 0; comboT = 0;
@@ -2169,11 +2169,13 @@ function update(dt) {
   if (rival && rival.hp > 0) { updateRival(dt); if (state !== S.PLAY) return; }
 
   // ----- guardian mecha: every city fields its own, and it must be destroyed -----
-  if (!boss && destroyedPct >= 0.45) {
+  // it holds the far end of the city — a last stand just before the level falls
+  if (!boss && destroyedPct >= CLEAR_PCT - 0.06) {
     const M = mechOf();
     // later cities field better-prepared defenders
     const hp = Math.round(M.hp * (1 + ngPlus * 0.4) * (1 + cityIdx * 0.045) * DIF().boss);
-    boss = { x: kaiju.x < worldW / 2 ? kaiju.x + 520 : kaiju.x - 520, y: 0, w: 90, h: 150,
+    const bx = kaiju.x > worldW - 760 ? Math.max(260, kaiju.x - 520) : worldW - 300;
+    boss = { x: bx, y: 0, w: 90, h: 150,
              hp, maxHp: hp, dir: 1, fireT: 2, laserT: 0, laserCd: 5, walk: 0, hurtT: 0, spec: M };
     bossWarnT = 3;
     sfx.roar();
@@ -2240,6 +2242,7 @@ function update(dt) {
       newsAlert("NAVAL TASK FORCE SIGHTED OFFSHORE", 1);
     }
     if (F.flashT > 0) F.flashT -= dt;
+    if (F.smokeT > 0) F.smokeT -= dt;
     if (F.cd > 0) F.cd -= dt;
     if (F.seen && F.volley <= 0 && F.strikes < 3 && F.cd <= 0 &&
         destroyedPct > 0.15 + F.strikes * 0.15) {
@@ -2251,9 +2254,12 @@ function update(dt) {
       F.shotT -= dt;
       if (F.shotT <= 0) {
         F.shotT = 0.55;
-        F.flashT = 0.14;
+        F.gun = (F.gun + 1) % 3;                       // ripple fire down the line
+        F.flashT = 0.3;
+        F.smokeT = 1.2;
         navMarks.push({ x: Math.max(60, Math.min(worldW - 60, kaiju.x + (Math.random() - 0.5) * 480)), t: 1.15 });
         snd(46, 0.5, "sawtooth", 0.16, -12);           // the distant gun's thump
+        noiseBurst(0.12, 0.05);
       }
       if (F.volley <= 0) F.cd = 9;
     }
@@ -2265,7 +2271,8 @@ function update(dt) {
         navMarks.splice(i, 1);
         eBullets.push({ x: mk.x + (Math.random() - 0.5) * 26, y: -30,
                         vx: (Math.random() - 0.5) * 40, vy: 400 + Math.random() * 80,
-                        grav: 110, dmg: 7, bomb: true, kind: "heshell" });
+                        grav: 110, dmg: 7, bomb: true, nav: true, kind: "heshell" });
+        snd(1400, 0.85, "sine", 0.06, -1100);          // the shell's falling whistle
       }
     }
   }
@@ -2517,11 +2524,12 @@ function updateBoss(dt) {
   if (b.hurtT > 0) b.hurtT -= dt;
   const dist = k.x - b.x;
   b.dir = Math.sign(dist) || 1;
-  if (Math.abs(dist) > 240 && b.laserT <= 0) b.x += b.dir * 42 * dt;
+  // strides in fast from its post at the city's edge, then slows to fighting pace
+  if (Math.abs(dist) > 240 && b.laserT <= 0) b.x += b.dir * (Math.abs(dist) > 620 ? 130 : 42) * dt;
 
   // missile volleys
   b.fireT -= dt;
-  if (b.fireT <= 0) {
+  if (b.fireT <= 0 && Math.abs(dist) < 950) {          // holds fire until the kaiju is in range
     b.fireT = 2.6;
     sfx.tank();
     for (let i = 0; i < 2; i++) {
@@ -3016,9 +3024,13 @@ function draw() {
 
   if (bossWarnT > 0 && Math.floor(performance.now() / 300) % 2) {
     ctx.textAlign = "center";
-    ctx.fillStyle = "#ff4477";
     ctx.font = "bold 22px monospace";
-    ctx.fillText("⚠ " + (boss && boss.spec ? boss.spec.name : "GUARDIAN MECHA") + " INBOUND ⚠", W / 2, 92);
+    const btxt = "⚠ " + (boss && boss.spec ? boss.spec.name : "GUARDIAN MECHA") + " — LAST LINE OF DEFENSE ⚠";
+    const bw2 = ctx.measureText(btxt).width;
+    ctx.fillStyle = "rgba(10,10,20,0.72)";
+    ctx.fillRect(W / 2 - bw2 / 2 - 12, 74, bw2 + 24, 26);
+    ctx.fillStyle = "#ff4477";
+    ctx.fillText(btxt, W / 2, 92);
   }
 
   if (state === S.PAUSE) drawPauseMenu();
@@ -3358,11 +3370,6 @@ function drawTerrain(city) {
     }
     ctx.fillStyle = "rgba(40,120,150,0.35)";             // the Pacific along the horizon
     ctx.fillRect(-200, GROUND - 34, 7000, 36);
-    ctx.fillStyle = "rgba(230,250,255,0.2)";
-    for (let i = 0; i < 40; i++) {
-      const sx2 = (i * 320 + (performance.now() / 40) % 320) % 12000;
-      ctx.fillRect(sx2, GROUND - 26 + (i % 3) * 7, 34, 2);
-    }
   } else if (city.bg === "mumbai") {
     ctx.fillStyle = "rgba(60,90,130,0.32)";              // the Arabian Sea
     ctx.fillRect(-200, GROUND - 30, 7000, 32);
@@ -3471,6 +3478,15 @@ function renderSkyline(city) {
   }
 }
 
+// Honolulu's rolling surf can't live in the static bake — it scrolls
+function drawSurfLive() {
+  ctx.fillStyle = "rgba(230,250,255,0.2)";
+  for (let i = 0; i < 40; i++) {
+    const sx2 = (i * 320 + (performance.now() / 40) % 320) % 12000;
+    if (sx2 < scnV0 - 40 || sx2 > scnV1) continue;
+    ctx.fillRect(sx2, GROUND - 26 + (i % 3) * 7, 34, 2);
+  }
+}
 function drawBackdrop(city) {
   // distant skyline: static layers are pre-baked per city — two blits per frame
   // instead of ~150 detailed paths
@@ -3480,10 +3496,10 @@ function drawBackdrop(city) {
   ensureBackdropCache(city);
   ctx.imageSmoothingEnabled = true;          // soft haze suits the distance layers
   ctx.drawImage(bgTerr, 0, TERR_Y);
-  drawTerrain(city);              // mountains / dunes / hills furthest back
+  if (city.bg === "honolulu") drawSurfLive();   // the one animated piece of the baked terrain
   drawCityScenery(city);          // famous background sights, behind the skyline
-  drawNavyFleet(city);            // grey silhouettes on the horizon water
   ctx.drawImage(bgSky, 0, SKY_Y);
+  drawNavyFleet(city);            // the task force must stay visible over the skyline
   ctx.imageSmoothingEnabled = false;
   drawCityTransit(city);          // trains/trams gliding through the mid-ground
   ctx.restore();
@@ -3499,9 +3515,16 @@ function drawNavyFleet(city) {
   if (oy === undefined) return;
   const now = performance.now();
   const baseX = scnV0 + 280 + (scnV1 - scnV0 - 560) * 0.66;
+  const ft = Math.max(0, navFleet.flashT) / 0.3;       // 1 -> 0 across each shot's flash
+  if (ft > 0) {                                        // each shot lights the sky over the water
+    ctx.fillStyle = "rgba(255,160,80," + (0.10 * ft * (OPT.reduceFlash ? 0.4 : 1)).toFixed(3) + ")";
+    ctx.fillRect(baseX - 150, GROUND + oy - 46, 300, 46);
+  }
   for (let i = 0; i < 3; i++) {
     const sc = i === 1 ? 1 : 0.78;
-    const sx = baseX + (i - 1) * 62;
+    const firing = navFleet.flashT > 0 && i === navFleet.gun;
+    const rec = firing ? ft * 3 : 0;                   // the hull kicks back from the shot
+    const sx = baseX + (i - 1) * 62 + rec;
     const sy = GROUND + oy + (i === 1 ? 0 : -2) + Math.sin(now / 900 + i * 2.1) * 1.4;
     ctx.globalAlpha = 0.88;
     ctx.fillStyle = "#3c4a5c";
@@ -3516,14 +3539,33 @@ function drawNavyFleet(city) {
     ctx.fillRect(sx - 1, sy - 10 * sc, 1.6, 5 * sc);            // mast
     ctx.fillStyle = "rgba(220,240,250,0.3)";                    // wake line
     ctx.fillRect(sx - 20 * sc, sy + 4 * sc, 40 * sc, 1.5);
-    if (navFleet.flashT > 0 && i === navFleet.strikes % 3) {    // firing flash
-      ctx.fillStyle = "#ffe9a0";
-      ctx.beginPath(); ctx.arc(sx - 15 * sc, sy - 3 * sc, 4, 0, 7); ctx.fill();
-      ctx.strokeStyle = "rgba(255,233,160,0.45)"; ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(sx - 15 * sc, sy - 3 * sc);
-      ctx.lineTo(sx - 46, sy - 64);
-      ctx.stroke(); ctx.lineWidth = 1;
+    const mx = sx - 15 * sc, my = sy - 3 * sc;         // the forward gun's muzzle
+    if (firing) {
+      ctx.fillStyle = "rgba(255,150,60," + (0.55 * ft).toFixed(3) + ")";   // orange bloom, expanding
+      ctx.beginPath(); ctx.arc(mx, my, 5 + 7 * (1 - ft), 0, 7); ctx.fill();
+      ctx.fillStyle = "rgba(255,255,240," + (0.9 * ft).toFixed(3) + ")";   // white-hot core
+      ctx.beginPath(); ctx.arc(mx, my, 1 + 3 * ft, 0, 7); ctx.fill();
+      ctx.fillStyle = "rgba(255,210,140," + (0.35 * ft).toFixed(3) + ")";  // mirrored on the water
+      ctx.fillRect(sx - 26 * sc, sy + 5 * sc, 52 * sc, 1.6);
+      const p = 1 - ft;                                // tracer races up toward the city
+      const hx = mx - 44 * p, hy = my - 62 * p;
+      const q = Math.max(0, p - 0.22);
+      ctx.strokeStyle = "rgba(255,180,90,0.3)"; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(mx - 44 * q, my - 62 * q); ctx.lineTo(hx, hy); ctx.stroke();
+      ctx.strokeStyle = "#ffe9a0"; ctx.lineWidth = 1.5;
+      const q2 = Math.max(0, p - 0.1);
+      ctx.beginPath(); ctx.moveTo(mx - 44 * q2, my - 62 * q2); ctx.lineTo(hx, hy); ctx.stroke();
+      ctx.lineWidth = 1;
+    }
+    if (navFleet.smokeT > 0 && i === navFleet.gun) {   // gunsmoke drifts off the muzzle
+      const st = navFleet.smokeT / 1.2;
+      ctx.fillStyle = "rgba(190,195,205," + (0.26 * st).toFixed(3) + ")";
+      for (let s2 = 0; s2 < 3; s2++) {
+        const dr = (1 - st) * (10 + s2 * 7);
+        ctx.beginPath();
+        ctx.arc(mx - dr * 0.8 - s2 * 3, my - 3 - dr * 0.55, 2 + (1 - st) * (3 + s2), 0, 7);
+        ctx.fill();
+      }
     }
     ctx.globalAlpha = 1;
   }
@@ -11461,6 +11503,12 @@ function drawBullets() {
       ctx.moveTo(-11, -5.5); ctx.lineTo(-11, 5.5);
       ctx.stroke();
     } else if (kind === "heshell") {
+      if (b.nav) {                                     // naval shells burn in like meteors
+        ctx.fillStyle = "rgba(255,160,70,0.16)";
+        ctx.fillRect(-36, -1.8, 28, 3.6);
+        ctx.fillStyle = "rgba(255,230,160,0.4)";
+        ctx.fillRect(-19, -1, 11, 2);
+      }
       ctx.fillStyle = "#8a8378";                       // stubby HE artillery round
       ctx.fillRect(-6, -3, 10, 6);
       ctx.fillStyle = "#6f6a60";
@@ -11807,8 +11855,8 @@ function drawHUD(city) {
     ctx.fillRect(W / 2 - 40, 52, 80 * Math.max(0, comboT / 3), 4);
   }
 
-  // boss health bar
-  if (boss && boss.hp > 0) {
+  // boss health bar — held back until the intro banner has had its moment
+  if (boss && boss.hp > 0 && bossWarnT <= 0) {
     ctx.textAlign = "center";
     ctx.fillStyle = "#ff4477";
     ctx.font = "bold 11px monospace";
@@ -11823,7 +11871,7 @@ function drawHUD(city) {
 
   // rival kaiju health bar
   if (rival && rival.hp > 0) {
-    const ry = boss && boss.hp > 0 ? 100 : 72;
+    const ry = boss && boss.hp > 0 && bossWarnT <= 0 ? 100 : 72;
     ctx.textAlign = "center";
     ctx.fillStyle = "#c060ff";
     ctx.font = "bold 11px monospace";
