@@ -825,7 +825,8 @@ let killCam = null;                                     // slow-mo cam on final 
 let evt = null, evtTimer = 12;                          // mid-level events
 let levelTime = 0, landmarkFirstBonus = false;
 let craters = [], aberrT = 0, introT = 0, crowdT = 2;
-let quakes = [], fireCount = 0, firestormAlerted = false, navyAlerted = false, navyT = 7;
+let quakes = [], fireCount = 0, firestormAlerted = false;
+let navFleet = { seen: false, strikes: 0, volley: 0, shotT: 0, cd: 0, flashT: 0 }, navMarks = [];
 let pauseSel = 0, confirmWipe = false;                   // in-game pause menu
 let settingsSel = 0, settingsFrom = 0, settingsBtns = []; // settings screen state
 const OPT_ROWS = [
@@ -1127,7 +1128,8 @@ function resetLevel() {
   killCam = null;
   evt = null; evtTimer = 10 + Math.random() * 8;
   nukedThisLevel = false;
-  quakes = []; fireCount = 0; firestormAlerted = false; navyAlerted = false; navyT = 7;
+  quakes = []; fireCount = 0; firestormAlerted = false;
+  navFleet = { seen: false, strikes: 0, volley: 0, shotT: 0, cd: 0, flashT: 0 }; navMarks = [];
   craters = [];
   levelTime = 0; landmarkFirstBonus = false;
   combo = 0; comboT = 0;
@@ -2229,25 +2231,41 @@ function update(dt) {
   // ----- army spawning & AI -----
   spawnTimer -= dt;
   const maxUnits = Math.max(2, Math.round((4 + Math.floor(destroyedPct * 8) + cityIdx + ngPlus * 2) * DIF().units));
-  // coastal cities: the navy keeps its own timetable — it doesn't wait for
-  // room in the ground-force cap
-  if (CITIES[cityIdx].navy && destroyedPct > 0.16) {   // gate on live destruction, not stale armyLevel
-    navyT -= dt;
-    if (navyT <= 0) {
-      navyT = 12 + Math.random() * 8;
-      const nDest = units.filter(u => u.kind === "destroyer").length;
-      const nCarr = units.filter(u => u.kind === "carrier").length;
-      if (nDest < 2 || nCarr < 1) {
-        const side = Math.random() < 0.5 ? 0 : 1;
-        const sx = side ? worldW - 140 - Math.random() * 120 : 140 + Math.random() * 120;
-        if (!navyAlerted) { navyAlerted = true; newsAlert("NAVAL TASK FORCE ON STATION OFFSHORE", 2); }
-        if (nCarr < 1 && (nDest >= 2 || Math.random() < 0.35)) {
-          units.push({ kind: "carrier", x: sx, y: 0, w: 130, h: 34, vx: 0, hp: 14,
-                       fireT: 4, jetT: 3, dir: sx > worldW / 2 ? -1 : 1, bobT: Math.random() * 6 });
-        } else {
-          units.push({ kind: "destroyer", x: sx, y: 0, w: 90, h: 26, vx: 0, hp: 8,
-                       fireT: 2.5, dir: sx > worldW / 2 ? -1 : 1, bobT: Math.random() * 6 });
-        }
+  // coastal cities: the fleet sits far offshore in the background and shells the
+  // creature from over the horizon — three bombardments per level, untouchable
+  if (CITIES[cityIdx].navy) {
+    const F = navFleet;
+    if (!F.seen && destroyedPct > 0.10) {
+      F.seen = true;
+      newsAlert("NAVAL TASK FORCE SIGHTED OFFSHORE", 1);
+    }
+    if (F.flashT > 0) F.flashT -= dt;
+    if (F.cd > 0) F.cd -= dt;
+    if (F.seen && F.volley <= 0 && F.strikes < 3 && F.cd <= 0 &&
+        destroyedPct > 0.15 + F.strikes * 0.15) {
+      F.volley = 3.2; F.shotT = 0.2; F.strikes++;
+      newsAlert("NAVAL BOMBARDMENT INBOUND — CLEAR THE AREA", 2);
+    }
+    if (F.volley > 0) {
+      F.volley -= dt;
+      F.shotT -= dt;
+      if (F.shotT <= 0) {
+        F.shotT = 0.55;
+        F.flashT = 0.14;
+        navMarks.push({ x: Math.max(60, Math.min(worldW - 60, kaiju.x + (Math.random() - 0.5) * 480)), t: 1.15 });
+        snd(46, 0.5, "sawtooth", 0.16, -12);           // the distant gun's thump
+      }
+      if (F.volley <= 0) F.cd = 9;
+    }
+    // marked impact points: the shell arrives when the reticle expires
+    for (let i = navMarks.length - 1; i >= 0; i--) {
+      const mk = navMarks[i];
+      mk.t -= dt;
+      if (mk.t <= 0) {
+        navMarks.splice(i, 1);
+        eBullets.push({ x: mk.x + (Math.random() - 0.5) * 26, y: -30,
+                        vx: (Math.random() - 0.5) * 40, vy: 400 + Math.random() * 80,
+                        grav: 110, dmg: 7, bomb: true, kind: "heshell" });
       }
     }
   }
@@ -3464,12 +3482,52 @@ function drawBackdrop(city) {
   ctx.drawImage(bgTerr, 0, TERR_Y);
   drawTerrain(city);              // mountains / dunes / hills furthest back
   drawCityScenery(city);          // famous background sights, behind the skyline
+  drawNavyFleet(city);            // grey silhouettes on the horizon water
   ctx.drawImage(bgSky, 0, SKY_Y);
   ctx.imageSmoothingEnabled = false;
   drawCityTransit(city);          // trains/trams gliding through the mid-ground
   ctx.restore();
 }
 
+
+// the task force: three grey silhouettes far out on the background water,
+// screen-anchored like every distant thing, flashing when the guns speak
+function drawNavyFleet(city) {
+  if (!city.navy || !navFleet.seen) return;
+  const OCEAN_Y = { honolulu: -76, sydney: -30, mumbai: -36, capetown: -28 };
+  const oy = OCEAN_Y[city.bg];
+  if (oy === undefined) return;
+  const now = performance.now();
+  const baseX = scnV0 + 280 + (scnV1 - scnV0 - 560) * 0.66;
+  for (let i = 0; i < 3; i++) {
+    const sc = i === 1 ? 1 : 0.78;
+    const sx = baseX + (i - 1) * 62;
+    const sy = GROUND + oy + (i === 1 ? 0 : -2) + Math.sin(now / 900 + i * 2.1) * 1.4;
+    ctx.globalAlpha = 0.88;
+    ctx.fillStyle = "#3c4a5c";
+    ctx.beginPath();                                   // hull
+    ctx.moveTo(sx - 17 * sc, sy);
+    ctx.lineTo(sx + 17 * sc, sy);
+    ctx.lineTo(sx + 13 * sc, sy + 4 * sc);
+    ctx.lineTo(sx - 13 * sc, sy + 4 * sc);
+    ctx.closePath(); ctx.fill();
+    ctx.fillRect(sx - 6 * sc, sy - 6 * sc, 9 * sc, 6 * sc);     // superstructure
+    ctx.fillRect(sx + 6 * sc, sy - 4 * sc, 5 * sc, 4 * sc);
+    ctx.fillRect(sx - 1, sy - 10 * sc, 1.6, 5 * sc);            // mast
+    ctx.fillStyle = "rgba(220,240,250,0.3)";                    // wake line
+    ctx.fillRect(sx - 20 * sc, sy + 4 * sc, 40 * sc, 1.5);
+    if (navFleet.flashT > 0 && i === navFleet.strikes % 3) {    // firing flash
+      ctx.fillStyle = "#ffe9a0";
+      ctx.beginPath(); ctx.arc(sx - 15 * sc, sy - 3 * sc, 4, 0, 7); ctx.fill();
+      ctx.strokeStyle = "rgba(255,233,160,0.45)"; ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(sx - 15 * sc, sy - 3 * sc);
+      ctx.lineTo(sx - 46, sy - 64);
+      ctx.stroke(); ctx.lineWidth = 1;
+    }
+    ctx.globalAlpha = 1;
+  }
+}
 
 // ---------- Per-city background sights ----------
 function drawCityScenery(city) {
@@ -4157,24 +4215,17 @@ function drawGroundStrip(city) {
     ctx.fillStyle = "rgba(210,224,240,0.18)";     // slush over the road
     ctx.fillRect(camX - 50, GROUND + 8, W + 100, H - GROUND - 8);
   }
-  // coastal cities: the city ends in open water at both edges
-  if (city.navy) {
-    for (const [x0, x1] of [[-80, 330], [worldW - 330, worldW + 80]]) {
-      if (x1 < camX - 60 || x0 > camX + W + 60) continue;
-      ctx.fillStyle = "#1d5f7e";
-      ctx.fillRect(x0, GROUND, x1 - x0, H - GROUND);
-      ctx.fillStyle = "#2b7c96";
-      ctx.fillRect(x0, GROUND, x1 - x0, 7);
-      ctx.fillStyle = "rgba(230,250,255,0.4)";           // surf at the seam
-      for (let i = 0; i < 4; i++) {
-        const ph = (performance.now() / (1100 + i * 300)) % 1;
-        ctx.fillRect(x0, GROUND + 3 + ph * 16 + i * 3, x1 - x0, 2);
-      }
-      // foam where the water meets the seawall
-      const seam = x0 < 0 ? x1 : x0;
-      ctx.fillStyle = "rgba(240,252,255,0.6)";
-      ctx.fillRect(seam - 3, GROUND, 6, 8);
-    }
+  // incoming naval fire: blinking impact reticles where the shells will land
+  for (const mk of navMarks) {
+    if (mk.x < camX - 40 || mk.x > camX + W + 40) continue;
+    const blink = Math.floor(performance.now() / 140) % 2;
+    ctx.strokeStyle = blink ? "#ff6a4a" : "#8a2a1c";
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(mk.x, GROUND + 2, 14, 0, 7); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(mk.x - 22, GROUND + 2); ctx.lineTo(mk.x - 8, GROUND + 2);
+    ctx.moveTo(mk.x + 8, GROUND + 2); ctx.lineTo(mk.x + 22, GROUND + 2);
+    ctx.stroke(); ctx.lineWidth = 1;
   }
   // quake wavefronts ripple along the street
   for (const q of quakes) {
