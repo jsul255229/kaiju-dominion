@@ -9326,7 +9326,8 @@ function drawKaijuModel(t, x, gy, f, o) {
   const body = o.hurt ? "#ff8888" : t.body;
   const belly = o.hurt ? "#ffaaaa" : t.belly;
   const spineC = o.hurt ? "#ffcccc" : t.spines;
-  const charged = (o.rage || 0) > 30 && Math.floor(performance.now() / 200) % 2;
+  // plates ignite only when the ultimate is actually ready — glow = "press it now"
+  const charged = (o.rage || 0) >= 100 && Math.floor(performance.now() / 200) % 2;
 
   // rage aura glow behind the body
   if ((o.rage || 0) >= 100) {
