@@ -11383,10 +11383,10 @@ function drawHUD(city) {
 
   // touch buttons (right side) — only on coarse pointers
   if (isTouch() && state === S.PLAY) {
-    btns.swipe  = { x: W - 58,  y: H - 118, r: 30 };
-    btns.stomp  = { x: W - 132, y: H - 100, r: 26 };
-    btns.breath = { x: W - 58,  y: H - 192, r: 26 };
-    btns.roar   = { x: W - 132, y: H - 168, r: 22 };
+    btns.swipe  = { x: W - 58,  y: H - 172, r: 30 };
+    btns.stomp  = { x: W - 132, y: H - 154, r: 26 };
+    btns.breath = { x: W - 58,  y: H - 246, r: 26 };
+    btns.roar   = { x: W - 132, y: H - 222, r: 22 };
     drawBtn(btns.swipe, "CLAW", "#ffcc66");
     drawBtn(btns.stomp, "STOMP", "#ff9966");
     drawBtn(btns.breath, "BEAM", "#66eeff");
@@ -11397,7 +11397,7 @@ function drawHUD(city) {
     let stick = null;
     for (const id in touches) { const t = touches[id]; if (t.sx < W * 0.45) { stick = t; break; } }
     const jbx = stick ? stick.sx : 92;
-    const jby = stick ? stick.sy : H - 120;
+    const jby = stick ? stick.sy : H - 190;   // resting spot sits above the kaiju
     const jr = 36;
     ctx.globalAlpha = stick ? 0.5 : 0.28;
     ctx.fillStyle = "#0e1420";                        // base
@@ -11433,12 +11433,16 @@ function drawHUD(city) {
   }
 }
 function drawBtn(b, label, color) {
-  ctx.globalAlpha = 0.35;
+  ctx.globalAlpha = 0.55;                     // dark base so buttons read over any skyline
+  ctx.fillStyle = "#0a0e18";
+  ctx.beginPath(); ctx.arc(b.x, b.y, b.r + 1.5, 0, 7); ctx.fill();
+  ctx.globalAlpha = 0.4;
   ctx.fillStyle = color;
   ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, 7); ctx.fill();
-  ctx.globalAlpha = 0.9;
-  ctx.strokeStyle = color;
+  ctx.globalAlpha = 0.95;
+  ctx.strokeStyle = color; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, 7); ctx.stroke();
+  ctx.lineWidth = 1;
   ctx.fillStyle = "#fff";
   ctx.font = "bold 10px monospace";
   ctx.textAlign = "center";
@@ -11660,6 +11664,17 @@ function drawMenu() {
   fsBtn = null;
   const fsOK = document.fullscreenEnabled || document.webkitFullscreenEnabled;
   const standalone = window.navigator.standalone || (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
+  // iPhone Safari can't hide its own bars — but installed to the home screen it can.
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+                (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  if (isIOS && !standalone && !fsOK) {
+    const bw2 = Math.min(W - 40, 560);
+    ctx.fillStyle = "rgba(20,26,42,0.94)";
+    ctx.fillRect(W / 2 - bw2 / 2, H - 52, bw2, 24);
+    ctx.strokeStyle = "#66eeff"; ctx.strokeRect(W / 2 - bw2 / 2, H - 52, bw2, 24);
+    ctx.fillStyle = "#9adcf0"; ctx.textAlign = "center";
+    fitText("FOR FULLSCREEN:  tap Safari's  ⬆ Share  →  \u201cAdd to Home Screen\u201d,  then play from the icon", W / 2, H - 36, bw2 - 16, 9, "bold");
+  }
   if (fsOK && !standalone) {
     fsBtn = { x: W - 118, y: 10, w: 102, h: 26 };
     const inFs = document.fullscreenElement || document.webkitFullscreenElement;
