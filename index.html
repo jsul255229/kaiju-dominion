@@ -42,7 +42,7 @@
 // ============================================================
 
 const cv = document.getElementById("cv");
-const ctx = cv.getContext("2d");
+let ctx = cv.getContext("2d");   // let: temporarily swapped while baking backdrop caches
 
 // Landscape logical resolution, letterboxed to fit any screen
 // Logical resolution. Height is fixed; width stretches with the screen's aspect
@@ -51,8 +51,17 @@ let W = 800;
 const H = 450;
 let scale = 1, dpr = 1;
 let portrait = false;
+// automatic quality governor: if real frame times sag, we shed cost in steps —
+// backing-store resolution first, then particles, then decorative extras
+const QUALITY = [
+  { dpr: 0.62, parts: 110, shimmer: false, clouds: false },
+  { dpr: 0.80, parts: 200, shimmer: false, clouds: true },
+  { dpr: 1.00, parts: 300, shimmer: true,  clouds: true }
+];
+let qTier = 2;
+let lastRz = { w: 0, cw: 0, ch: 0 };
 function resize() {
-  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  dpr = Math.min(window.devicePixelRatio || 1, 2) * QUALITY[qTier].dpr;
   // visualViewport tracks the *usable* area on mobile (URL bar, keyboard, safe areas)
   const vv = window.visualViewport;
   const availW = Math.max(1, Math.floor(vv ? vv.width : window.innerWidth));
@@ -64,6 +73,11 @@ function resize() {
   // stretch the playfield to the screen's shape before computing the fit
   W = Math.round(Math.min(1000, Math.max(800, (availW / availH) * H)));
   scale = Math.min(availW / W, availH / H);
+  // iOS fires visualViewport scroll/resize storms during play — reallocating the
+  // canvas backing store on every event is catastrophic. Bail out when unchanged.
+  const cw2 = Math.max(1, Math.round(W * scale * dpr)), ch2 = Math.max(1, Math.round(H * scale * dpr));
+  if (W === lastRz.w && cw2 === lastRz.cw && ch2 === lastRz.ch) return;
+  lastRz = { w: W, cw: cw2, ch: ch2 };
   cv.style.width = (W * scale) + "px";
   cv.style.height = (H * scale) + "px";
   cv.width = Math.max(1, Math.round(W * scale * dpr));
@@ -1544,9 +1558,9 @@ function spawnUnit() {
 }
 
 // ---------- Helpers ----------
-const MAX_PARTICLES = 300;
 function trimParticles() {
-  if (particles.length > MAX_PARTICLES) particles.splice(0, particles.length - MAX_PARTICLES);
+  const cap = QUALITY[qTier].parts;
+  if (particles.length > cap) particles.splice(0, particles.length - cap);
 }
 function boom(x, y, color, n = 16, speed = 120, grav = 200) {
   for (let i = 0; i < n; i++) {
@@ -2925,7 +2939,7 @@ function draw() {
 
   drawBackdrop(city);
   drawBuildings(city);
-  drawHeatShimmer();
+  if (QUALITY[qTier].shimmer) drawHeatShimmer();
 
   drawGroundStrip(city);
   drawCivilians();
@@ -3134,6 +3148,7 @@ function drawSky(city) {
     for (let i = 0; i < 40; i++) ctx.fillRect((i * 97 + 31) % W, (i * 53 + 11) % (H * 0.5), 1.5, 1.5);
   }
   // drifting clouds (tinted by time of day)
+  if (!QUALITY[qTier].clouds) return;
   const cl = city.time === "night" ? "rgba(60,60,90,0.35)" : city.time === "dusk" ? "rgba(200,120,90,0.25)"
            : city.time === "dawn" ? "rgba(230,170,120,0.28)" : "rgba(235,240,245,0.35)";
   ctx.fillStyle = cl;
@@ -3285,7 +3300,7 @@ function drawTerrain(city) {
       ridge(pts2, sand1);
     }
     ctx.fillStyle = "rgba(255,220,160,0.10)";           // shimmering horizon
-    ctx.fillRect(camX * -0.6, GROUND - 60, 12000, 60);
+    ctx.fillRect(-200, GROUND - 60, 7000, 60);
   } else if (city.bg === "sanfran") {
     for (let rep = 0; rep < 4; rep++) {
       const o = rep * 1500;
@@ -3294,7 +3309,7 @@ function drawTerrain(city) {
     }
   } else if (city.bg === "moscow") {
     ctx.fillStyle = "rgba(226,234,246,0.13)";           // snow haze over a flat plain
-    ctx.fillRect(camX * -0.6, GROUND - 40, 12000, 42);
+    ctx.fillRect(-200, GROUND - 40, 7000, 42);
   } else if (city.bg === "capetown") {
     // Table Mountain's massif and Lion's Head standing over the City Bowl
     for (let rep = 0; rep < 4; rep++) {
@@ -3324,7 +3339,7 @@ function drawTerrain(city) {
       }
     }
     ctx.fillStyle = "rgba(40,120,150,0.35)";             // the Pacific along the horizon
-    ctx.fillRect(camX * -0.6, GROUND - 34, 12000, 36);
+    ctx.fillRect(-200, GROUND - 34, 7000, 36);
     ctx.fillStyle = "rgba(230,250,255,0.2)";
     for (let i = 0; i < 40; i++) {
       const sx2 = (i * 320 + (performance.now() / 40) % 320) % 12000;
@@ -3332,18 +3347,35 @@ function drawTerrain(city) {
     }
   } else if (city.bg === "mumbai") {
     ctx.fillStyle = "rgba(60,90,130,0.32)";              // the Arabian Sea
-    ctx.fillRect(camX * -0.6, GROUND - 30, 12000, 32);
+    ctx.fillRect(-200, GROUND - 30, 7000, 32);
     ctx.fillStyle = "rgba(255,190,120,0.10)";            // haze
-    ctx.fillRect(camX * -0.6, GROUND - 70, 12000, 70);
+    ctx.fillRect(-200, GROUND - 70, 7000, 70);
   }
 }
 
-function drawBackdrop(city) {
-  // distant skyline silhouette (parallax)
-  ctx.save();
-  ctx.translate(camX * 0.6, 0);
-  drawTerrain(city);              // mountains / dunes / hills furthest back
-  drawCityScenery(city);          // famous background sights, behind the skyline
+let bgTerr = null, bgSky = null, bgKey = "";
+const BG_W = 6600, TERR_Y = 120, SKY_Y = 50;
+let scnV0 = -1e9, scnV1 = 1e9;              // visible window, in scenery coordinates
+function ensureBackdropCache(city) {
+  const key = city.bg + "|" + city.time + "|" + city.weather + "|" + cityIdx;
+  if (key === bgKey && bgTerr) return;
+  bgKey = key;
+  const mk = h => { const c = document.createElement("canvas"); c.width = BG_W; c.height = h; return c; };
+  bgTerr = mk(H - TERR_Y);
+  bgSky = mk(H - SKY_Y);
+  const real = ctx;
+  const oldV0 = scnV0, oldV1 = scnV1;
+  scnV0 = -1e9; scnV1 = 1e9;                // bake the full strip
+  ctx = bgTerr.getContext("2d");
+  ctx.translate(0, -TERR_Y);
+  drawTerrain(city);
+  ctx = bgSky.getContext("2d");
+  ctx.translate(0, -SKY_Y);
+  renderSkyline(city);
+  ctx = real;
+  scnV0 = oldV0; scnV1 = oldV1;
+}
+function renderSkyline(city) {
   const rng = mulberry(cityIdx * 55 + 3);
   const SK = SKYLINE[city.bg] || { far: [40, 80], near: [60, 130], roof: "flat" };
   // far layer: hazier, shorter
@@ -3419,9 +3451,25 @@ function drawBackdrop(city) {
     const bx = (i * 61) % 4400, by = GROUND - 40 - (i * 37) % 150;
     ctx.fillRect(bx, by, 2, 3);
   }
+}
+
+function drawBackdrop(city) {
+  // distant skyline: static layers are pre-baked per city — two blits per frame
+  // instead of ~150 detailed paths
+  ctx.save();
+  ctx.translate(camX * 0.6, 0);
+  scnV0 = camX * 0.4 - 280; scnV1 = camX * 0.4 + W + 280;
+  ensureBackdropCache(city);
+  ctx.imageSmoothingEnabled = true;          // soft haze suits the distance layers
+  ctx.drawImage(bgTerr, 0, TERR_Y);
+  drawTerrain(city);              // mountains / dunes / hills furthest back
+  drawCityScenery(city);          // famous background sights, behind the skyline
+  ctx.drawImage(bgSky, 0, SKY_Y);
+  ctx.imageSmoothingEnabled = false;
   drawCityTransit(city);          // trains/trams gliding through the mid-ground
   ctx.restore();
 }
+
 
 // ---------- Per-city background sights ----------
 function drawCityScenery(city) {
@@ -3430,6 +3478,7 @@ function drawCityScenery(city) {
     // Mt. Fuji on the horizon
     for (let rep = 0; rep < 3; rep++) {
       const fx = 320 + rep * 1200;
+      if (fx > scnV1 + 200 || fx + 1400 < scnV0) continue;
       ctx.fillStyle = "#232038";
       ctx.beginPath();
       ctx.moveTo(fx - 190, GROUND - 30);
@@ -3451,6 +3500,7 @@ function drawCityScenery(city) {
   } else if (city.bg === "london") {
     for (let rep = 0; rep < 3; rep++) {
       const off = rep * 1300;
+      if (off > scnV1 || off + 1300 + 500 < scnV0) continue;
       // Tower Bridge: two gothic towers + high walkway + bascules
       const tbx = 500 + off, ty = GROUND - 30;
       ctx.fillStyle = "#2a2a44";
@@ -3494,6 +3544,7 @@ function drawCityScenery(city) {
   } else if (city.bg === "newyork") {
     for (let rep = 0; rep < 3; rep++) {
       const off = rep * 1400;
+      if (off > scnV1 || off + 1400 + 500 < scnV0) continue;
       // Statue of Liberty silhouette out in the harbor
       const sx = 600 + off, sy = GROUND - 30;
       ctx.fillStyle = "#252a40";
@@ -3521,6 +3572,7 @@ function drawCityScenery(city) {
   } else if (city.bg === "sydney") {
     for (let rep = 0; rep < 3; rep++) {
       const off = rep * 1300;
+      if (off > scnV1 || off + 1300 + 500 < scnV0) continue;
       // Harbour Bridge: giant steel through-arch ("the Coathanger")
       const hx = 650 + off, hy = GROUND - 30, hw = 260;
       ctx.strokeStyle = "#2a3448"; ctx.lineWidth = 6;
@@ -3557,6 +3609,7 @@ function drawCityScenery(city) {
   } else if (city.bg === "sanfran") {
     for (let rep = 0; rep < 3; rep++) {
       const off = rep * 1400;
+      if (off > scnV1 || off + 1400 + 500 < scnV0) continue;
       // second Golden Gate tower shrouded in fog + hills
       ctx.fillStyle = "#2a2338";
       ctx.beginPath();                                            // marin headlands
@@ -3592,6 +3645,7 @@ function drawCityScenery(city) {
   } else if (city.bg === "paris") {
     for (let rep = 0; rep < 3; rep++) {
       const off = rep * 1300;
+      if (off > scnV1 || off + 1300 + 500 < scnV0) continue;
       // Arc de Triomphe
       const ax = 520 + off, ay = GROUND - 30;
       ctx.fillStyle = "#2c2840";
@@ -3623,6 +3677,7 @@ function drawCityScenery(city) {
   } else if (city.bg === "rio") {
     for (let rep = 0; rep < 3; rep++) {
       const off = rep * 1400;
+      if (off > scnV1 || off + 1400 + 500 < scnV0) continue;
       // Sugarloaf Mountain pair rising from the bay
       ctx.fillStyle = "#28304a";
       ctx.beginPath();
@@ -3679,6 +3734,7 @@ function drawCityScenery(city) {
   } else if (city.bg === "dubai") {
     for (let rep = 0; rep < 3; rep++) {
       const off = rep * 1400;
+      if (off > scnV1 || off + 1400 + 500 < scnV0) continue;
       // desert dunes shimmering behind the towers
       ctx.fillStyle = "#2e2840";
       ctx.beginPath();
@@ -3705,6 +3761,7 @@ function drawCityScenery(city) {
   } else if (city.bg === "rome") {
     for (let rep = 0; rep < 3; rep++) {
       const off = rep * 1300;
+      if (off > scnV1 || off + 1300 + 500 < scnV0) continue;
       // rolling hills with umbrella pines
       ctx.fillStyle = "#2a2a3e";
       ctx.beginPath();
@@ -3728,6 +3785,7 @@ function drawCityScenery(city) {
   } else if (city.bg === "cairo") {
     for (let rep = 0; rep < 3; rep++) {
       const off = rep * 1400;
+      if (off > scnV1 || off + 1400 + 500 < scnV0) continue;
       // the two sister pyramids on the plateau
       for (const [px2, ps] of [[420, 1], [640, 0.72]]) {
         ctx.fillStyle = "#2e2a3c";
@@ -3754,6 +3812,7 @@ function drawCityScenery(city) {
   } else if (city.bg === "shanghai") {
     for (let rep = 0; rep < 4; rep++) {
       const off = rep * 1500;
+      if (off > scnV1 || off + 1500 + 500 < scnV0) continue;
       // the Huangpu, with barges working downriver and neon bleeding into the water
       ctx.fillStyle = "rgba(30,40,72,0.85)";
       ctx.fillRect(off - 100, GROUND - 30, 1500, 32);
@@ -3795,6 +3854,7 @@ function drawCityScenery(city) {
   } else if (city.bg === "moscow") {
     for (let rep = 0; rep < 4; rep++) {
       const off = rep * 1500;
+      if (off > scnV1 || off + 1500 + 500 < scnV0) continue;
       // the crenellated Kremlin wall with its towers, under snow
       const wallY = GROUND - 64;
       ctx.fillStyle = "#2d2334";
@@ -3839,6 +3899,7 @@ function drawCityScenery(city) {
   } else if (city.bg === "mumbai") {
     for (let rep = 0; rep < 4; rep++) {
       const off = rep * 1500;
+      if (off > scnV1 || off + 1500 + 500 < scnV0) continue;
       // Haji Ali's causeway shrine out in the bay
       ctx.fillStyle = "#2a2438";
       ctx.fillRect(off + 260, GROUND - 46, 70, 22);
@@ -3878,6 +3939,7 @@ function drawCityScenery(city) {
   } else if (city.bg === "capetown") {
     for (let rep = 0; rep < 4; rep++) {
       const off = rep * 1500;
+      if (off > scnV1 || off + 1500 + 500 < scnV0) continue;
       // the working harbour: cranes, containers, a moored freighter
       ctx.fillStyle = "rgba(46,86,120,0.5)";
       ctx.fillRect(off + 820, GROUND - 26, 660, 28);
@@ -3907,30 +3969,33 @@ function drawCityScenery(city) {
     // Waikīkī shoreline: open ocean, breaking surf and a sand strand
     const shore = GROUND - 42;
     ctx.fillStyle = "#1d5f7e";
-    ctx.fillRect(-400, GROUND - 108, 13000, 52);
+    ctx.fillRect(scnV0, GROUND - 108, scnV1 - scnV0, 52);
     ctx.fillStyle = "#2b7c96";                            // shallow reef water
-    ctx.fillRect(-400, GROUND - 66, 13000, 18);
+    ctx.fillRect(scnV0, GROUND - 66, scnV1 - scnV0, 18);
     ctx.fillStyle = "rgba(120,215,225,0.35)";
     for (let i = 0; i < 90; i++) {
       const sx3 = (i * 150 + (now / 55) % 150) % 13000 - 400;
+      if (sx3 < scnV0 - 50 || sx3 > scnV1) continue;
       ctx.fillRect(sx3, GROUND - 104 + (i % 5) * 10, 44, 2.4);
     }
     for (let i = 0; i < 5; i++) {                         // rollers breaking on the reef
       const ph = ((now / (1500 + i * 340)) % 1);
       ctx.fillStyle = "rgba(240,255,255," + (0.45 * (1 - ph)) + ")";
-      ctx.fillRect(-400, GROUND - 62 + ph * 14, 13000, 3);
+      ctx.fillRect(scnV0, GROUND - 62 + ph * 14, scnV1 - scnV0, 3);
     }
     ctx.fillStyle = "#e0cda2";                            // the strand
-    ctx.fillRect(-400, shore - 12, 13000, 14);
+    ctx.fillRect(scnV0, shore - 12, scnV1 - scnV0, 14);
     ctx.fillStyle = "rgba(255,252,240,0.5)";              // wash line
-    ctx.fillRect(-400, shore - 13, 13000, 2.5);
+    ctx.fillRect(scnV0, shore - 13, scnV1 - scnV0, 2.5);
     ctx.fillStyle = "#cbb489";
     for (let i = 0; i < 60; i++) {
       const sx3 = (i * 230) % 13000 - 400;
+      if (sx3 < scnV0 - 40 || sx3 > scnV1) continue;
       ctx.beginPath(); ctx.ellipse(sx3, shore - 4, 30, 4, 0, 0, 7); ctx.fill();
     }
     for (let rep = 0; rep < 4; rep++) {
       const off = rep * 1500;
+      if (off > scnV1 || off + 1500 + 500 < scnV0) continue;
       // beach umbrellas and surfboards stuck in the sand
       for (let i = 0; i < 5; i++) {
         const ux = off + 120 + i * 290;
@@ -9096,10 +9161,8 @@ function drawKaijuModel(t, x, gy, f, o) {
     ctx.beginPath(); ctx.ellipse(0, -65, 70, 78, 0, 0, 7); ctx.fill();
     ctx.globalAlpha = 1;
   }
-  // soft self-shadow gives the sprite depth against the city
-  ctx.shadowColor = "rgba(0,0,10,0.45)";
-  ctx.shadowBlur = 8;
-  ctx.shadowOffsetY = 3;
+  // (the old blurred self-shadow cost a Gaussian pass on EVERY body path —
+  //  ruinous on mobile GPUs; the ground contact shadow carries the depth cue)
 
   if (t.feature === "cracks") drawVolkanorBody(t, o, body, belly, spineC, charged);
   else if (t.feature === "wings") drawZephyraxBody(t, o, body, belly, spineC, charged);
@@ -9108,8 +9171,6 @@ function drawKaijuModel(t, x, gy, f, o) {
   else if (t.feature === "blob") drawGloopthraxBody(t, o, body, belly, spineC, charged);
   else drawGorgonaxBody(t, o, body, belly, spineC, charged, tailSweep);
 
-  ctx.shadowBlur = 0;
-  ctx.shadowOffsetY = 0;
   ctx.restore();
 }
 
@@ -11391,11 +11452,13 @@ function drawPowerups() {
     const blink = p.t < 3 && Math.floor(performance.now() / 150) % 2;
     if (blink) continue;
     const c = p.kind === "heal" ? "#66ff88" : "#66eeff";
-    ctx.fillStyle = c;
-    ctx.shadowColor = c; ctx.shadowBlur = 10;
     const bob = Math.sin(performance.now() / 300) * 4;
+    const gg = ctx.createRadialGradient(p.x, p.y - 14 + bob, 2, p.x, p.y - 14 + bob, 16);
+    gg.addColorStop(0, c + "88"); gg.addColorStop(1, c + "00");
+    ctx.fillStyle = gg;
+    ctx.beginPath(); ctx.arc(p.x, p.y - 14 + bob, 16, 0, 7); ctx.fill();
+    ctx.fillStyle = c;
     ctx.beginPath(); ctx.arc(p.x, p.y - 14 + bob, 9, 0, 7); ctx.fill();
-    ctx.shadowBlur = 0;
     ctx.fillStyle = "#000";
     ctx.font = "bold 11px monospace"; ctx.textAlign = "center";
     ctx.fillText(p.kind === "heal" ? "+" : "R", p.x, p.y - 10 + bob);
@@ -12658,8 +12721,21 @@ function drawPhotoFilter(city) {
 
 // ---------- Main loop ----------
 let last = performance.now();
+let perfAcc = 0, perfN = 0, perfGood = 0, perfStamp = 0;
 function frame(now) {
   let dt = Math.min(0.04, (now - last) / 1000);
+  // measure REAL wall-clock frame spacing and govern quality from it
+  const rawMs = perfStamp ? now - perfStamp : 16;
+  perfStamp = now;
+  if (state === S.PLAY && rawMs > 0 && rawMs < 400) {
+    perfAcc += rawMs; perfN++;
+    if (perfN >= 75) {
+      const avg = perfAcc / perfN; perfAcc = 0; perfN = 0;
+      if (avg > 27 && qTier > 0) { qTier--; resize(); perfGood = 0; }
+      else if (avg < 15 && qTier < 2 && ++perfGood >= 3) { qTier++; resize(); perfGood = 0; }
+      else if (avg >= 15) perfGood = 0;
+    }
+  }
   last = now;
   if (killCam) {                       // slow-mo kill cam on the final landmark
     killCam.t -= dt;
