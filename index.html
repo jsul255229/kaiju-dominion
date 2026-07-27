@@ -153,9 +153,17 @@ function cbGood() { return OPT.colorblind ? "#4aa8ff" : "#66dd66"; }
 function cbBad()  { return OPT.colorblind ? "#ff9a3c" : "#ff5555"; }
 function cbDone() { return OPT.colorblind ? "#66bbff" : "#66ff99"; }
 
+// during firestorms and chain collapses dozens of sounds can fire at once —
+// on mobile Safari the audio thread will strangle the frame rate. Budget voices.
+let voiceCount = 0, voiceWindow = 0;
+function voiceOK() {
+  const now = performance.now();
+  if (now - voiceWindow > 120) { voiceWindow = now; voiceCount = 0; }
+  return ++voiceCount <= 12;
+}
 function snd(freq, dur = 0.1, type = "square", vol = 0.15, slide = 0, chan = "sfx") {
   vol *= chan === "music" ? OPT.music : OPT.sfx;
-  if (vol <= 0.001) return;
+  if (vol <= 0.001 || !voiceOK()) return;
   if (muted) return;
   try {
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -172,7 +180,7 @@ function snd(freq, dur = 0.1, type = "square", vol = 0.15, slide = 0, chan = "sf
 }
 function noiseBurst(dur = 0.3, vol = 0.25, chan = "sfx") {
   vol *= chan === "music" ? OPT.music : OPT.sfx;
-  if (vol <= 0.001) return;
+  if (vol <= 0.001 || !voiceOK()) return;
   if (muted) return;
   try {
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -1536,6 +1544,10 @@ function spawnUnit() {
 }
 
 // ---------- Helpers ----------
+const MAX_PARTICLES = 300;
+function trimParticles() {
+  if (particles.length > MAX_PARTICLES) particles.splice(0, particles.length - MAX_PARTICLES);
+}
 function boom(x, y, color, n = 16, speed = 120, grav = 200) {
   for (let i = 0; i < n; i++) {
     const a = Math.random() * Math.PI * 2, v = Math.random() * speed + 30;
@@ -1993,8 +2005,8 @@ function update(dt) {
     }
     if (b.burn > 0) {
       b.burn -= dt;
-      if (Math.random() < dt * 6) smoke(b.x + b.w / 2, GROUND - b.h, 1);
-      if (Math.random() < dt * 2.5)                      // drifting embers
+      if (Math.random() < dt * 2.2) smoke(b.x + b.w / 2, GROUND - b.h, 1);
+      if (Math.random() < dt * 1.2)                      // drifting embers
         particles.push({ x: b.x + Math.random() * b.w, y: GROUND - b.h * Math.random(),
                          vx: (Math.random() - 0.5) * 30, vy: -40 - Math.random() * 50,
                          life: 0.7, color: "#ffb04a", grav: -30 });
@@ -2449,6 +2461,7 @@ function update(dt) {
     pt.life -= dt;
   }
   particles = particles.filter(p => p.life > 0);
+  trimParticles();
   for (const f of floaters) { f.y -= 26 * dt; f.life -= dt; }
   floaters = floaters.filter(f => f.life > 0);
 
