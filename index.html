@@ -45,7 +45,10 @@ const cv = document.getElementById("cv");
 const ctx = cv.getContext("2d");
 
 // Landscape logical resolution, letterboxed to fit any screen
-const W = 800, H = 450;
+// Logical resolution. Height is fixed; width stretches with the screen's aspect
+// ratio (800–1000) so phones and ultrawide monitors fill instead of letterboxing.
+let W = 800;
+const H = 450;
 let scale = 1, dpr = 1;
 let portrait = false;
 function resize() {
@@ -58,6 +61,8 @@ function resize() {
   // it just letterboxes
   portrait = availH > availW * 1.05 &&
              (window.matchMedia ? window.matchMedia("(pointer: coarse)").matches : false);
+  // stretch the playfield to the screen's shape before computing the fit
+  W = Math.round(Math.min(1000, Math.max(800, (availW / availH) * H)));
   scale = Math.min(availW / W, availH / H);
   cv.style.width = (W * scale) + "px";
   cv.style.height = (H * scale) + "px";
@@ -743,7 +748,7 @@ let bestGrades = (function () {
   } catch (e) { return {}; }
 })();
 function gradeOf(i) { const g = bestGrades[CITIES[i].name]; return g === undefined ? null : g; }
-let mapSel = 0, mapBtn = null, backBtn = null, diffBtns = [];  // map cursor, strike/back/difficulty hit rects
+let mapSel = 0, mapBtn = null, backBtn = null, diffBtns = [], fsBtn = null;  // menu hit rects
 let killCam = null;                                     // slow-mo cam on final landmark
 let evt = null, evtTimer = 12;                          // mid-level events
 let levelTime = 0, landmarkFirstBonus = false;
@@ -1148,6 +1153,16 @@ let touches = {};
 const btns = {}; // computed each frame in draw for hit zones
 cv.addEventListener("pointerdown", e => {
   setInputMode(e.pointerType === "touch" ? "touch" : (e.pointerType === "pen" ? "touch" : "key"));
+  if (state === S.MENU && fsBtn && inRect(toGameClamped(e), fsBtn)) {
+    const el = document.documentElement;
+    const inFs = document.fullscreenElement || document.webkitFullscreenElement;
+    try {
+      if (inFs) (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+      else (el.requestFullscreen || el.webkitRequestFullscreen).call(el);
+    } catch (err) {}
+    setTimeout(resize, 300);
+    return;
+  }
   if (state === S.MENU || state === S.OVER || state === S.WIN) { state = S.SELECT; sfx.pickup(); return; }
   // the ◀ BACK affordance on the select and map screens
   if (state === S.SELECT || state === S.MAP) {
@@ -11377,12 +11392,44 @@ function drawHUD(city) {
     drawBtn(btns.breath, "BEAM", "#66eeff");
     drawBtn(btns.roar, "ROAR", kaiju.roarCd > 0 ? "#666677" : "#ffdd44");
     // move hint zone
-    ctx.globalAlpha = 0.25;
-    ctx.fillStyle = "#fff";
-    ctx.font = "11px monospace";
-    ctx.textAlign = "left";
-    ctx.fillText("◄ drag to move ►", 16, H - 56);
+    // virtual joystick: rests at the natural thumb spot, snaps to wherever the
+    // thumb actually lands, and the nub tracks the drag
+    let stick = null;
+    for (const id in touches) { const t = touches[id]; if (t.sx < W * 0.45) { stick = t; break; } }
+    const jbx = stick ? stick.sx : 92;
+    const jby = stick ? stick.sy : H - 120;
+    const jr = 36;
+    ctx.globalAlpha = stick ? 0.5 : 0.28;
+    ctx.fillStyle = "#0e1420";                        // base
+    ctx.beginPath(); ctx.arc(jbx, jby, jr, 0, 7); ctx.fill();
+    ctx.strokeStyle = "#8fa2c0"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(jbx, jby, jr, 0, 7); ctx.stroke();
+    ctx.lineWidth = 1;
+    ctx.fillStyle = "#8fa2c0";                        // direction ticks
+    ctx.beginPath();
+    ctx.moveTo(jbx - jr + 7, jby); ctx.lineTo(jbx - jr + 14, jby - 5); ctx.lineTo(jbx - jr + 14, jby + 5);
+    ctx.closePath(); ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(jbx + jr - 7, jby); ctx.lineTo(jbx + jr - 14, jby - 5); ctx.lineTo(jbx + jr - 14, jby + 5);
+    ctx.closePath(); ctx.fill();
+    // the nub follows the thumb, clamped to the ring
+    let nx = jbx, ny = jby;
+    if (stick) {
+      const dx = Math.max(-jr + 8, Math.min(jr - 8, stick.x - stick.sx));
+      nx = jbx + dx;
+    }
+    ctx.globalAlpha = stick ? 0.85 : 0.4;
+    const jg = ctx.createRadialGradient(nx - 3, ny - 3, 2, nx, ny, 15);
+    jg.addColorStop(0, "#c9d4e8"); jg.addColorStop(1, "#5a6a88");
+    ctx.fillStyle = jg;
+    ctx.beginPath(); ctx.arc(nx, ny, 15, 0, 7); ctx.fill();
+    if (!stick) {
+      ctx.globalAlpha = 0.35;
+      ctx.fillStyle = "#c8d2e4"; ctx.font = "bold 8px monospace"; ctx.textAlign = "center";
+      ctx.fillText("MOVE", jbx, jby + jr + 12);
+    }
     ctx.globalAlpha = 1;
+    ctx.textAlign = "left";
   }
 }
 function drawBtn(b, label, color) {
@@ -11609,6 +11656,19 @@ function drawMenu() {
   const foot = (hiscore > 0 ? "BEST  " + hiscore + "        " : "") +
                (padConnected ? "🎮 CONTROLLER READY        " : "") + "v1.0";
   ctx.fillText(foot, W / 2, H - 14);
+  // fullscreen toggle for browsers that allow it (iPad, Android, desktop)
+  fsBtn = null;
+  const fsOK = document.fullscreenEnabled || document.webkitFullscreenEnabled;
+  const standalone = window.navigator.standalone || (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
+  if (fsOK && !standalone) {
+    fsBtn = { x: W - 118, y: 10, w: 102, h: 26 };
+    const inFs = document.fullscreenElement || document.webkitFullscreenElement;
+    ctx.fillStyle = "rgba(20,26,42,0.94)";
+    ctx.fillRect(fsBtn.x, fsBtn.y, fsBtn.w, fsBtn.h);
+    ctx.strokeStyle = "#6a76a0"; ctx.strokeRect(fsBtn.x, fsBtn.y, fsBtn.w, fsBtn.h);
+    ctx.fillStyle = "#b6c0d6"; ctx.font = "bold 9px monospace"; ctx.textAlign = "center";
+    ctx.fillText(inFs ? "⛶ EXIT FULL" : "⛶ FULLSCREEN", fsBtn.x + fsBtn.w / 2, fsBtn.y + 17);
+  }
   ctx.fillStyle = DIF().col; ctx.font = "bold 10px monospace";
   ctx.fillText("DIFFICULTY: " + DIF().name + "   (D to change)", W / 2, H - 30);
 }
@@ -11832,9 +11892,11 @@ function mapProj(lon, lat) {
 
 // Pins are relaxed apart so no two ever overlap; a hairline tether points back to
 // the true coordinate. Deterministic, so it is computed once and cached.
-let mapPins = null;
+let mapPins = null, mapPinsW = 0;
 function layoutMapPins() {
-  if (mapPins) return mapPins;
+  MAP_BOX.x = Math.round((W - MAP_BOX.w) / 2);   // stay centred at any playfield width
+  if (mapPins && mapPinsW === W) return mapPins;
+  mapPinsW = W;
   const pts = CITIES.map((c, i) => {
     const [x, y] = mapProj(c.lon, c.lat);
     return { i, x, y, tx: x, ty: y };
