@@ -9667,33 +9667,42 @@ function drawGorgonaxBody(t, o, body, belly, spineC, charged, tailSweep) {
 // ---- VOLKANOR: hulking magma brute — armoured bull-ape with a volcanic back ----
 function drawVolkanorBody(t, o, body, belly, spineC, charged) {
   const now = performance.now();
+  const rage = o.rage || 0;
+  const erupting = rage >= 100;                 // THE gate for the back vents
+  const heat = Math.min(1, rage / 100);         // 0..1 — brightens identity glows only
   const legA = Math.sin((o.walk || 0) * 2) * 5;
   const stompDip = o.stompT > 0.55 ? 10 : 0;
-  const glow = o.hurt ? "#ffdddd" : charged ? "#ffee66" : "#ff7a2a";
-  const dark = shade(body, -26), darker = shade(body, -42), lightB = shade(body, 16);
   const breathe = o.breathing ? Math.sin(now / 150) * 1.6 : 0;
 
-  // ---------- layer 1: far limbs, pushed back in shade ----------
-  const drawLimbFar = (col) => {
-    ctx.fillStyle = col;
-    // far leg
-    ctx.beginPath();
-    ctx.moveTo(-16, -54);
-    ctx.quadraticCurveTo(-30, -34, -24, -legA);
-    ctx.lineTo(-4, -legA);
-    ctx.quadraticCurveTo(-2, -34, 2, -54);
-    ctx.closePath(); ctx.fill();
-    ctx.fillRect(-28, -6 - legA, 26, 6);
-    // far arm hanging behind the chest
-    ctx.beginPath();
-    ctx.moveTo(-4, -96);
-    ctx.quadraticCurveTo(-22, -74, -18, -44);
-    ctx.lineTo(-2, -42);
-    ctx.quadraticCurveTo(-4, -70, 10, -92);
-    ctx.closePath(); ctx.fill();
-    ctx.beginPath(); ctx.arc(-10, -40, 9, 0, 7); ctx.fill();
-  };
-  drawLimbFar(darker);
+  // palette-driven glow colours (skin-safe: everything derives from t.beam / body / belly / spineC)
+  const lava = o.hurt ? "#ffdddd" : (t.beam || "#ff7a2a");
+  const lavaHot = o.hurt ? "#ffffff" : shade(lava, 34);
+  const fiss = charged ? lavaHot : lava;        // charged = 200ms accent flash only
+  const dark = shade(body, -26), darker = shade(body, -42), lightB = shade(body, 16);
+  const rock = shade(body, -52);                // deepest, coolest — far limbs
+  const bone = "#e8ddc6", boneD = shade("#e8ddc6", -26);
+  const AO = "rgba(5,4,16,0.26)";               // ambient occlusion at joints
+  const warmA = 0.14 + heat * 0.08;             // core bounce-light strength
+
+  const dot = (x, y, r) => { ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill(); };
+  const ell = (x, y, rx, ry, rot) => { ctx.beginPath(); ctx.ellipse(x, y, rx, ry, rot || 0, 0, 7); ctx.fill(); };
+
+  // ---------- layer 1: far limbs — deepest shade, no core light reaches them ----------
+  ctx.fillStyle = rock;
+  ctx.beginPath();                                          // far leg
+  ctx.moveTo(-16, -54);
+  ctx.quadraticCurveTo(-30, -34, -24, -legA);
+  ctx.lineTo(-4, -legA);
+  ctx.quadraticCurveTo(-2, -34, 2, -54);
+  ctx.closePath(); ctx.fill();
+  ctx.fillRect(-28, -6 - legA, 26, 6);                      // far foot
+  ctx.beginPath();                                          // far arm hanging behind the chest
+  ctx.moveTo(-4, -96);
+  ctx.quadraticCurveTo(-22, -74, -18, -44);
+  ctx.lineTo(-2, -42);
+  ctx.quadraticCurveTo(-4, -70, 10, -92);
+  ctx.closePath(); ctx.fill();
+  dot(-10, -40, 9);                                         // far fist
 
   // ---------- layer 2: thick club tail ----------
   ctx.fillStyle = dark;
@@ -9704,154 +9713,243 @@ function drawVolkanorBody(t, o, body, belly, spineC, charged) {
   ctx.quadraticCurveTo(-48, -26, -30, -40);
   ctx.quadraticCurveTo(-18, -48, -12, -50);
   ctx.closePath(); ctx.fill();
-  ctx.fillStyle = darker;                                  // rocky club tip
-  ctx.beginPath(); ctx.arc(-62, -20, 11, 0, 7); ctx.fill();
-  ctx.fillStyle = glow;
-  for (const [gx, gy] of [[-66, -24], [-58, -14], [-64, -13]])
-    { ctx.beginPath(); ctx.arc(gx, gy, 1.8, 0, 7); ctx.fill(); }
+  ctx.fillStyle = darker; dot(-62, -20, 11);                // rocky club
+  ctx.fillStyle = "rgba(38,48,86,0.16)"; ell(-65, -22, 7, 8);   // cool ambient on the far face
+  ctx.strokeStyle = rock; ctx.lineWidth = 1;                // cracked-boulder texture
+  ctx.beginPath();
+  ctx.moveTo(-68, -25); ctx.lineTo(-61, -21);
+  ctx.moveTo(-57, -27); ctx.lineTo(-60, -18);
+  ctx.stroke();
+  ctx.globalAlpha = 0.55 + heat * 0.45;                     // ember studs (identity — always lit, dim when calm)
+  ctx.fillStyle = fiss;
+  ctx.beginPath();
+  for (const [gx, gy] of [[-66, -24], [-58, -14], [-64, -13]]) { ctx.moveTo(gx + 1.8, gy); ctx.arc(gx, gy, 1.8, 0, 7); }
+  ctx.fill(); ctx.globalAlpha = 1;
 
-  // ---------- layer 3: torso — heavy barrel chest hunched over the hips ----------
+  // ---------- layer 3: torso — barrel chest hunched over the hips, relit from the core ----------
   ctx.fillStyle = body;
   ctx.beginPath();
-  ctx.moveTo(-18, -50);                                    // hip, rear
-  ctx.quadraticCurveTo(-26, -78, -18, -100);               // back rises
-  ctx.quadraticCurveTo(-8, -118 - breathe, 12, -116 - breathe); // shoulder hump
-  ctx.quadraticCurveTo(28, -112, 30, -92);                 // chest front
-  ctx.quadraticCurveTo(32, -70, 24, -52);                  // belly
+  ctx.moveTo(-18, -50);
+  ctx.quadraticCurveTo(-26, -78, -18, -100);
+  ctx.quadraticCurveTo(-8, -118 - breathe, 12, -116 - breathe);
+  ctx.quadraticCurveTo(28, -112, 30, -92);
+  ctx.quadraticCurveTo(32, -70, 24, -52);
   ctx.quadraticCurveTo(4, -44, -18, -50);
   ctx.closePath(); ctx.fill();
-  // lit top / shaded underside for volume
-  ctx.fillStyle = "rgba(255,255,255,0.10)";
+  ctx.fillStyle = "rgba(38,48,86,0.16)";                    // cool ambient down the rear haunch, away from the core
   ctx.beginPath();
-  ctx.moveTo(-18, -100);
-  ctx.quadraticCurveTo(-8, -118 - breathe, 12, -116 - breathe);
-  ctx.quadraticCurveTo(6, -104, -14, -96);
+  ctx.moveTo(-18, -50); ctx.quadraticCurveTo(-26, -78, -18, -100);
+  ctx.quadraticCurveTo(-13, -80, -7, -58); ctx.quadraticCurveTo(-13, -52, -18, -50);
   ctx.closePath(); ctx.fill();
-  ctx.fillStyle = "rgba(0,0,20,0.18)";
+  ctx.fillStyle = "rgba(0,0,20,0.18)";                      // occlusion under the belly overhang
   ctx.beginPath();
   ctx.moveTo(-18, -50); ctx.quadraticCurveTo(4, -44, 24, -52);
   ctx.quadraticCurveTo(6, -58, -16, -58);
   ctx.closePath(); ctx.fill();
-  // pale armour plating across the belly
-  ctx.fillStyle = belly;
+  ctx.fillStyle = "rgba(0,0,20,0.10)";                      // tonal rock patches
+  ell(-8, -84, 7, 10, 0.4); ell(1, -63, 6, 4, -0.3);
+  ctx.strokeStyle = shade(body, -34);                       // hairline cracks in the hide
+  ctx.beginPath();
+  ctx.moveTo(-16, -72); ctx.lineTo(-9, -69);
+  ctx.moveTo(-2, -98); ctx.lineTo(4, -93); ctx.lineTo(2, -88);
+  ctx.moveTo(14, -64); ctx.lineTo(19, -60);
+  ctx.stroke();
+  ctx.fillStyle = belly;                                    // pale armour plating across the belly
   ctx.beginPath();
   ctx.moveTo(20, -104); ctx.quadraticCurveTo(32, -84, 22, -54);
   ctx.quadraticCurveTo(10, -50, 6, -56);
   ctx.quadraticCurveTo(14, -80, 12, -102);
   ctx.closePath(); ctx.fill();
-  ctx.strokeStyle = shade(belly, -28); ctx.lineWidth = 1.2;
-  for (let i = 0; i < 5; i++) {
-    const yy = -60 - i * 10;
-    ctx.beginPath(); ctx.moveTo(8, yy); ctx.lineTo(24 - i, yy - 2); ctx.stroke();
-  }
-  ctx.lineWidth = 1;
-  // magma fissures webbing the hide
-  ctx.strokeStyle = glow; ctx.lineWidth = 2;
+  ctx.strokeStyle = shade(belly, -28); ctx.lineWidth = 1.2; // plate ridges, one pass
+  ctx.beginPath();
+  for (let i = 0; i < 5; i++) { const yy = -60 - i * 10; ctx.moveTo(8, yy); ctx.lineTo(24 - i, yy - 2); }
+  ctx.stroke();
+  ctx.strokeStyle = "rgba(255,170,90," + (0.26 + heat * 0.2) + ")";  // warm bounce off the core on the plate edge
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(19, -102); ctx.quadraticCurveTo(30, -84, 21, -56); ctx.stroke();
+  ctx.strokeStyle = erupting ? lava : "rgba(255,190,140,0.25)";      // rim light along the back ridge
+  ctx.globalAlpha = erupting ? 0.7 : 1; ctx.lineWidth = 1.6;
+  ctx.beginPath(); ctx.moveTo(-18.5, -99); ctx.quadraticCurveTo(-8, -117 - breathe, 11, -115 - breathe); ctx.stroke();
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = fiss; ctx.lineWidth = 2 + heat * 0.7;   // magma fissures webbing the hide — identity, always lit
   ctx.beginPath();
   ctx.moveTo(-14, -60); ctx.lineTo(-4, -74); ctx.lineTo(-10, -88); ctx.lineTo(0, -100);
   ctx.moveTo(-4, -74); ctx.lineTo(8, -80);
   ctx.moveTo(-10, -88); ctx.lineTo(-20, -92);
   ctx.stroke(); ctx.lineWidth = 1;
-  // white-hot core burning in the chest
-  const coreR = 9 + (charged ? Math.sin(now / 100) * 2 : 0);
-  const cg = ctx.createRadialGradient(16, -88, 1, 16, -88, coreR * 1.8);
-  cg.addColorStop(0, "#fff3c0"); cg.addColorStop(0.4, glow); cg.addColorStop(1, "rgba(255,90,20,0)");
-  ctx.fillStyle = cg;
-  ctx.beginPath(); ctx.arc(16, -88, coreR * 1.8, 0, 7); ctx.fill();
+  // white-hot chest core (the only gradient)
+  const coreR = 9 + heat * 2 + Math.sin(now / 320) * 0.8 + breathe * 0.4 + (charged ? Math.sin(now / 100) * 2 : 0);
+  const cg = ctx.createRadialGradient(16, -88, 1, 16, -88, coreR * 1.9);
+  cg.addColorStop(0, o.hurt ? "#ffffff" : "#fff3c0");
+  cg.addColorStop(0.4, lava);
+  cg.addColorStop(1, "rgba(255,90,20,0)");
+  ctx.fillStyle = cg; dot(16, -88, coreR * 1.9);
 
-  // ---------- layer 4: volcanic vents standing proud of the back ----------
-  const vents = [[-16, -98], [-4, -110], [8, -116]];
-  vents.forEach(([vx, vy], i) => {
-    ctx.fillStyle = darker;                                // cone fused into the back
+  // ---------- layer 4: the three back craters — DORMANT until rage hits 100 ----------
+  const vents = [[-16, -98, 17], [-4, -110, 8], [8, -116, 4]];   // [x, y, fountain height]
+  if (erupting) {                                           // warm glow washing the whole back ridge
+    ctx.fillStyle = lava;
+    ctx.globalAlpha = 0.10; dot(-4, -104, 34);
+    ctx.globalAlpha = 0.13; dot(-7, -102, 21);
+    ctx.globalAlpha = 1;
+  }
+  vents.forEach(([vx, vy, amp], i) => {
+    ctx.fillStyle = darker;                                 // rocky cone fused into the back
     ctx.beginPath();
     ctx.moveTo(vx - 11, vy + 5);
     ctx.lineTo(vx - 5, vy - 11);
     ctx.lineTo(vx + 5, vy - 11);
     ctx.lineTo(vx + 11, vy + 5);
     ctx.closePath(); ctx.fill();
-    ctx.fillStyle = "#2a1a16";                             // crater mouth
-    ctx.beginPath(); ctx.ellipse(vx, vy - 11, 5.5, 2.2, 0, 0, 7); ctx.fill();
-    ctx.fillStyle = charged ? "#ffe27a" : glow;            // glowing throat
-    ctx.beginPath(); ctx.ellipse(vx, vy - 10.5, 3.6, 1.4, 0, 0, 7); ctx.fill();
-    if (charged || o.breathing) {                          // embers spitting out
-      for (let e = 0; e < 3; e++) {
-        const ph = (now / 260 + i * 0.4 + e * 0.33) % 1;
-        ctx.fillStyle = `rgba(255,${150 - ph * 90 | 0},40,${1 - ph})`;
-        ctx.beginPath();
-        ctx.arc(vx + Math.sin(ph * 6 + i) * 4, vy - 12 - ph * 26, 2.4 * (1 - ph * 0.5), 0, 7);
-        ctx.fill();
+    ctx.fillStyle = "#221714";                              // crater mouth
+    ell(vx, vy - 11, 5.5, 2.2);
+    if (erupting) {
+      ctx.fillStyle = "rgba(255,150,70,0.30)";              // fire-lit face of the cone
+      ctx.beginPath();
+      ctx.moveTo(vx + 5, vy - 11); ctx.lineTo(vx + 11, vy + 5); ctx.lineTo(vx + 4, vy + 5);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = lava; ell(vx, vy - 11, 4.2, 1.7);     // molten throat
+      ctx.fillStyle = charged ? "#fff3c0" : lavaHot; ell(vx, vy - 11.3, 2.6, 1.1);
+      for (let e = 0; e < (i === 2 ? 2 : 3); e++) {         // lava fountain, phase-cycled particles
+        const ph = (now / 240 + i * 0.41 + e / 3) % 1;
+        ctx.globalAlpha = 1 - ph * ph;
+        ctx.fillStyle = ph < 0.35 ? lavaHot : lava;
+        dot(vx + Math.sin(ph * 7 + i * 2 + e) * (2 + ph * 3) - (i === 2 ? ph * 6 : 0),
+            vy - 12 - ph * amp, 2.2 - ph);
       }
+      ctx.globalAlpha = 1;
+    } else {
+      ctx.fillStyle = "#120c0b"; ell(vx, vy - 11, 3.6, 1.4);        // cold, dead throat
+      ctx.strokeStyle = shade(lava, -55); ctx.globalAlpha = 0.5;    // dull deep-red cooled rim
+      ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.ellipse(vx, vy - 10.6, 4.6, 1.9, 0, 3.4, 6.1); ctx.stroke();
+      ctx.globalAlpha = 1;
     }
   });
+  if (erupting) {
+    ctx.strokeStyle = lava; ctx.lineWidth = 2; ctx.globalAlpha = 0.85;  // molten runnel spilling off the crest vent
+    ctx.beginPath(); ctx.moveTo(6, -125); ctx.quadraticCurveTo(-4, -121, -13, -103); ctx.stroke();
+    const pr = (now / 800) % 1, u = 1 - pr;                 // hot blob riding the runnel
+    ctx.fillStyle = lavaHot;
+    dot(u * u * 6 + 2 * u * pr * -4 + pr * pr * -13, u * u * -125 + 2 * u * pr * -121 + pr * pr * -103, 1.6);
+    for (let k = 0; k < 3; k++) {                           // arcing lava bombs flung back over the tail
+      const ph = (now / 950 + k / 3) % 1;
+      const bx = -16 - ph * (18 + k * 9);
+      const by = -109 - Math.sin(ph * Math.PI) * (13 + k * 3);
+      ctx.globalAlpha = 1 - ph * 0.6;
+      ctx.fillStyle = ph < 0.3 ? lavaHot : lava;
+      dot(bx, by, 2.6 - ph * 0.8);
+      ctx.globalAlpha = (1 - ph) * 0.5;
+      dot(bx + 2 + ph * 2, by + 2, 1.2);                    // trailing spark
+    }
+    ctx.globalAlpha = 1;
+  }
+  // smoke: faint thin wisps when dormant, thick column when erupting
+  ctx.lineWidth = erupting ? 2.4 : 1.3;
+  ctx.strokeStyle = erupting ? "rgba(90,86,96,0.34)" : "rgba(150,148,158,0.18)";
+  ctx.beginPath();
+  for (const i of erupting ? [0, 1, 2] : [0, 1]) {
+    const [vx, vy] = vents[i];
+    const sway = Math.sin(now / 650 + i * 2.1);
+    const rise = (erupting ? [18, 8, 3] : [12, 6, 0])[i];
+    ctx.moveTo(vx + 2, vy - 13);
+    ctx.quadraticCurveTo(vx + sway * 4 - 3, vy - 13 - rise * 0.6, vx + sway * 6 - 8, vy - 13 - rise);
+  }
+  ctx.stroke(); ctx.lineWidth = 1;
 
-  // ---------- layer 5: neck and head, clearly forward of the chest ----------
-  const headX = 44, headY = -104;
-  ctx.fillStyle = body;                                    // short powerful neck
+  // ---------- layer 5: neck and head, forward of the chest ----------
+  const jaw = (o.breathing ? 7 : 0) + (o.swipeT > 0 ? 4 : 0);
+  ctx.fillStyle = body;                                     // short powerful neck
   ctx.beginPath();
   ctx.moveTo(14, -112 - breathe);
   ctx.quadraticCurveTo(32, -116, 42, -112);
   ctx.lineTo(44, -92);
   ctx.quadraticCurveTo(30, -88, 18, -96);
   ctx.closePath(); ctx.fill();
-  ctx.fillStyle = darker;                                  // neck shadow under the jaw
+  ctx.fillStyle = darker;                                   // occlusion under the jaw hinge
   ctx.beginPath();
   ctx.moveTo(18, -96); ctx.quadraticCurveTo(30, -88, 44, -92);
   ctx.lineTo(44, -96); ctx.quadraticCurveTo(30, -93, 20, -100);
   ctx.closePath(); ctx.fill();
-  // skull: blunt bull wedge
-  ctx.fillStyle = lightB;
+  ctx.fillStyle = "rgba(255,150,70," + warmA + ")";         // core bounce light up the throat
+  ctx.beginPath();
+  ctx.moveTo(20, -98); ctx.quadraticCurveTo(30, -90, 42, -93);
+  ctx.lineTo(42, -96); ctx.quadraticCurveTo(30, -94, 22, -101);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = lightB;                                   // skull: blunt bull wedge
   ctx.beginPath();
   ctx.moveTo(30, -116);
-  ctx.quadraticCurveTo(52, -122, 66, -112);                // brow ridge sweeping forward
+  ctx.quadraticCurveTo(52, -122, 66, -112);
   ctx.lineTo(74, -102);
-  ctx.quadraticCurveTo(72, -96, 62, -97);                  // snout tip
+  ctx.quadraticCurveTo(72, -96, 62, -97);
   ctx.lineTo(34, -94);
   ctx.quadraticCurveTo(26, -104, 30, -116);
   ctx.closePath(); ctx.fill();
-  ctx.fillStyle = "rgba(0,0,20,0.16)";                     // lower half of skull in shade
+  ctx.fillStyle = "rgba(0,0,20,0.16)";                      // lower half of skull in shade
   ctx.beginPath();
   ctx.moveTo(34, -100); ctx.lineTo(70, -101);
   ctx.quadraticCurveTo(72, -96, 62, -97); ctx.lineTo(34, -94);
   ctx.closePath(); ctx.fill();
-  // hinged lower jaw with tusks
-  const jaw = (o.breathing ? 7 : 0) + (o.swipeT > 0 ? 4 : 0);
-  ctx.fillStyle = shade(body, -12);
+  ctx.fillStyle = dark;                                     // heavy brow ledge
+  ctx.beginPath();
+  ctx.moveTo(44, -117);
+  ctx.quadraticCurveTo(56, -120, 65, -112);
+  ctx.lineTo(63, -108);
+  ctx.quadraticCurveTo(54, -114, 46, -112);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = "rgba(5,4,16,0.30)";                      // socket shadow under the brow
+  ctx.beginPath();
+  ctx.moveTo(48, -112); ctx.lineTo(64, -108); ctx.lineTo(61, -104); ctx.lineTo(50, -107);
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = shade(body, -10);                       // skull scarring + snout crease
+  ctx.beginPath();
+  ctx.moveTo(40, -114); ctx.lineTo(44, -109); ctx.lineTo(42, -105);
+  ctx.moveTo(62, -107); ctx.lineTo(68, -104);
+  ctx.stroke();
+  ctx.fillStyle = "rgba(20,10,8,0.6)"; ell(70, -102, 1.6, 1.1, 0.3);  // nostril
+  ctx.fillStyle = shade(body, -12);                         // hinged lower jaw
   ctx.beginPath();
   ctx.moveTo(34, -94);
   ctx.lineTo(64, -95 + jaw * 0.4);
   ctx.quadraticCurveTo(68, -89 + jaw, 58, -87 + jaw);
   ctx.lineTo(34, -88 + jaw * 0.4);
   ctx.closePath(); ctx.fill();
-  ctx.fillStyle = "#f0e6d0";                               // upward tusks
-  for (const [tx2, ts] of [[56, 1], [46, 0.8]]) {
-    ctx.beginPath();
-    ctx.moveTo(tx2, -95 + jaw * 0.4);
-    ctx.lineTo(tx2 + 3 * ts, -106 * 1 + jaw * 0.2);
-    ctx.lineTo(tx2 + 7 * ts, -95 + jaw * 0.4);
-    ctx.closePath(); ctx.fill();
+  if (o.breathing) {                                        // magma glow inside the mouth (never the vents)
+    ctx.globalAlpha = 0.8; ctx.fillStyle = lava;
+    ell(52, -92 + jaw * 0.5, 11, 3 + jaw * 0.3); ctx.globalAlpha = 1;
   }
-  if (o.breathing) {                                       // magma glow inside the mouth
-    ctx.fillStyle = "rgba(255,140,40,0.8)";
-    ctx.beginPath(); ctx.ellipse(52, -92 + jaw * 0.5, 11, 3 + jaw * 0.3, 0, 0, 7); ctx.fill();
-  }
-  // forward-curving horns
-  ctx.fillStyle = "#e8ddc6";
-  for (const [hx, hy, hs] of [[38, -116, 1], [50, -118, 0.85]]) {
+  const jb = -95 + jaw * 0.4;                               // tusks — front one chipped
+  ctx.fillStyle = bone;
+  ctx.beginPath();
+  ctx.moveTo(46, jb); ctx.lineTo(48.4, jb - 8.8); ctx.lineTo(51.6, jb);
+  ctx.moveTo(55, jb); ctx.lineTo(57, jb - 10); ctx.lineTo(58.2, jb - 7.4);
+  ctx.lineTo(59.6, jb - 8.8); ctx.lineTo(61, jb);
+  ctx.fill();
+  ctx.fillStyle = boneD;                                    // shaded tusk facets
+  ctx.beginPath();
+  ctx.moveTo(48.4, jb - 8.8); ctx.lineTo(51.6, jb); ctx.lineTo(49.4, jb);
+  ctx.moveTo(59.6, jb - 8.8); ctx.lineTo(61, jb); ctx.lineTo(58.8, jb);
+  ctx.fill();
+  const hornShape = (hx, hy, hs) => {                       // forward-curving horns (spineC so skins recolor)
     ctx.beginPath();
     ctx.moveTo(hx - 4 * hs, hy);
     ctx.quadraticCurveTo(hx + 10 * hs, hy - 16 * hs, hx + 22 * hs, hy - 8 * hs);
     ctx.quadraticCurveTo(hx + 12 * hs, hy - 8 * hs, hx + 4 * hs, hy + 1);
     ctx.closePath(); ctx.fill();
-  }
-  // deep-set molten eye under the brow
-  ctx.fillStyle = "#1c1210";
-  ctx.beginPath(); ctx.ellipse(56, -110, 6, 4, -0.15, 0, 7); ctx.fill();
-  ctx.fillStyle = o.hurt ? "#ffffff" : charged ? "#fff0a0" : "#ffb03a";
-  ctx.beginPath(); ctx.ellipse(57, -110, 3.4, 2.3, -0.15, 0, 7); ctx.fill();
-  ctx.fillStyle = "#2a1408";
-  ctx.beginPath(); ctx.ellipse(58, -110, 1.2, 2, 0, 0, 7); ctx.fill();
-  ctx.fillStyle = "rgba(255,150,60,0.25)";                 // eye glow
-  ctx.beginPath(); ctx.arc(57, -110, 8, 0, 7); ctx.fill();
+  };
+  ctx.fillStyle = shade(spineC, -18); hornShape(38, -116, 1);
+  ctx.fillStyle = spineC; hornShape(50, -118, 0.85);
+  ctx.strokeStyle = shade(spineC, -32); ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  ctx.moveTo(70, -125); ctx.quadraticCurveTo(60, -125, 54, -117);
+  ctx.stroke(); ctx.lineWidth = 1;
+  ctx.fillStyle = "#160e0c";                                // deep-set socket, angled down — mean
+  ell(56, -109.5, 6.2, 3.1, -0.28);
+  ctx.fillStyle = o.hurt ? "#ffffff" : charged ? lavaHot : shade(lava, 16);
+  ell(57.2, -109.6, 3.2, 1.8, -0.28);
+  ctx.fillStyle = "#20100a";                                // slit pupil
+  ell(58.2, -109.8, 1, 1.7, -0.1);
+  ctx.fillStyle = "rgba(255,150,60,0.22)"; dot(57, -110, 7);      // ember glow in the socket
 
   // ---------- layer 6: near leg ----------
   ctx.fillStyle = body;
@@ -9861,58 +9959,65 @@ function drawVolkanorBody(t, o, body, belly, spineC, charged) {
   ctx.lineTo(18, legA - stompDip * 0.2);
   ctx.quadraticCurveTo(22, -34, 20, -56);
   ctx.closePath(); ctx.fill();
-  ctx.fillStyle = "rgba(255,255,255,0.09)";                // thigh mass highlight
-  ctx.beginPath(); ctx.ellipse(6, -42, 9, 12, 0, 0, 7); ctx.fill();
-  ctx.strokeStyle = glow; ctx.lineWidth = 1.6;             // fissure down the shin
+  ctx.fillStyle = AO; ell(8, -52, 12, 5);                   // hip-joint occlusion where leg meets belly
+  ctx.fillStyle = "rgba(255,255,255,0.09)"; ell(6, -42, 9, 12);   // thigh mass
+  ctx.strokeStyle = "rgba(255,160,80," + warmA + ")";       // core light down the leading edge
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(18.5, -54); ctx.quadraticCurveTo(20.5, -34, 16.5, legA - stompDip * 0.2 - 2); ctx.stroke();
+  ctx.strokeStyle = fiss; ctx.lineWidth = 1.6;              // fissure down the shin
   ctx.beginPath(); ctx.moveTo(2, -46); ctx.lineTo(8, -30); ctx.lineTo(2, -16); ctx.stroke();
   ctx.lineWidth = 1;
-  ctx.fillStyle = darker;                                  // broad rocky foot
+  ctx.fillStyle = darker;                                   // broad rocky foot
   ctx.fillRect(-12, -8 + legA * 0.2, 38, 8);
-  ctx.fillStyle = "#e8ddc6";
+  ctx.fillStyle = bone;                                     // toe claws, one pass
+  ctx.beginPath();
   for (let i = 0; i < 3; i++) {
-    ctx.beginPath();
     ctx.moveTo(16 + i * 6, -7 + legA * 0.2);
     ctx.lineTo(24 + i * 6, -3 + legA * 0.2);
     ctx.lineTo(16 + i * 6, legA * 0.2);
-    ctx.closePath(); ctx.fill();
   }
+  ctx.fill();
 
   // ---------- layer 7: near arm — huge, in front of everything ----------
   const swing = o.swipeT > 0 ? (o.swipeKind === 2 ? -1.9 : o.swipeKind === 3 ? 1.2 : 1.7) * Math.sin(Math.min(1, o.swipeT) * Math.PI) : 0;
   ctx.save();
-  // shoulder low and forward so the knuckles drag by the hip and the head stays clear
   ctx.translate(16, -92);
   ctx.rotate(0.92 - swing);
-  ctx.fillStyle = lightB;
-  ctx.beginPath();                                         // boulder shoulder
-  ctx.arc(0, 0, 16, 0, 7); ctx.fill();
+  ctx.fillStyle = lightB; dot(0, 0, 16);                    // boulder shoulder
+  ctx.strokeStyle = AO; ctx.lineWidth = 3;                  // socket occlusion ring
+  ctx.beginPath(); ctx.arc(0, 0, 14, 1.9, 4.2); ctx.stroke();
+  ctx.fillStyle = "rgba(255,150,70," + warmA + ")";         // core bounce on the inner shoulder face
+  ell(-5, -7, 8, 6, 0.4);
   ctx.fillStyle = body;
-  ctx.beginPath();                                         // upper arm → forearm
+  ctx.beginPath();                                          // upper arm → forearm
   ctx.moveTo(-10, -6);
   ctx.quadraticCurveTo(16, -14, 34, -8);
   ctx.quadraticCurveTo(50, -2, 54, 6);
   ctx.quadraticCurveTo(44, 18, 26, 14);
   ctx.quadraticCurveTo(8, 12, -8, 10);
   ctx.closePath(); ctx.fill();
-  ctx.fillStyle = darker;                                  // massive fist
-  ctx.beginPath(); ctx.arc(54, 6, 14, 0, 7); ctx.fill();
-  ctx.fillStyle = "#e8ddc6";                               // knuckle claws
+  ctx.strokeStyle = shade(body, -32);                       // forearm rock cracks
+  ctx.beginPath();
+  ctx.moveTo(26, 3); ctx.lineTo(31, 9);
+  ctx.moveTo(38, -3); ctx.lineTo(42, 3);
+  ctx.stroke();
+  ctx.fillStyle = darker; dot(54, 6, 14);                   // massive fist
+  ctx.fillStyle = AO; ell(43, 4, 3.5, 8, 0.15);             // wrist occlusion
+  ctx.fillStyle = bone;                                     // knuckle claws — middle one chipped short
+  ctx.beginPath();
   for (let i = 0; i < 3; i++) {
-    ctx.beginPath();
+    const ln = i === 1 ? 7 : 10;
     ctx.moveTo(60, -4 + i * 7);
-    ctx.lineTo(70, -2 + i * 7);
+    ctx.lineTo(60 + ln, -2 + i * 7);
     ctx.lineTo(60, 2 + i * 7);
-    ctx.closePath(); ctx.fill();
   }
-  ctx.fillStyle = "rgba(255,255,255,0.08)";                // bicep highlight
-  ctx.beginPath(); ctx.ellipse(16, -4, 14, 6, 0.05, 0, 7); ctx.fill();
-  ctx.strokeStyle = glow; ctx.lineWidth = 1.8;             // magma crack along the arm
+  ctx.fill();
+  ctx.fillStyle = "rgba(255,255,255,0.08)"; ell(16, -4, 14, 6, 0.05);  // bicep highlight
+  ctx.strokeStyle = fiss; ctx.lineWidth = 1.8 + heat * 0.5; // magma crack along the arm — identity, always lit
   ctx.beginPath(); ctx.moveTo(0, 2); ctx.lineTo(18, -4); ctx.lineTo(34, 4); ctx.lineTo(48, 0); ctx.stroke();
   ctx.lineWidth = 1;
   ctx.restore();
 }
-
-// ---- GLOOPTHRAX: a translucent devouring ooze with swallowed wreckage inside ----
 function drawGloopthraxBody(t, o, body, belly, spineC, charged) {
   const now = performance.now();
   const wob = now / 260;
