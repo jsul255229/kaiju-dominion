@@ -10549,171 +10549,317 @@ function drawZephyraxBody(t, o, body, belly, spineC, charged) {
 function drawKrakenothBody(t, o, body, belly, spineC, charged) {
   const now = performance.now();
   const crawl = (o.walk || 0) * 2;
+  const abyssal = (o.rage || 0) >= 100;
+  const whirl = !!o.whirl;
+  const stompP = o.stompT > 0.55 ? Math.min(1, (o.stompT - 0.55) / 0.3) : 0;
+  const idle = Math.sin(now / 480);        // slow gelatinous heave
+  const squish = idle * 2;
+  const flow = now / 260;                  // photophore flow clock
 
-  // tentacle skirt (locomotion — no legs at all)
+  function qp(c, tt) {                     // point on a quadratic curve
+    const u = 1 - tt;
+    return [u * u * c[0] + 2 * u * tt * c[2] + tt * tt * c[4],
+            u * u * c[1] + 2 * u * tt * c[3] + tt * tt * c[5]];
+  }
+
+  // ---- tentacle skirt: its only locomotion. Rear rank darkest, drawn first ----
   ctx.lineCap = "round";
-  for (let i = 0; i < 6; i++) {
-    const baseX = -25 + i * 10;
-    const ph = crawl + i * 1.1;
-    const reach = Math.sin(ph) * 14;
-    const lift = Math.max(0, Math.cos(ph)) * 8;
-    ctx.strokeStyle = i % 2 ? body : shade(body, -20);
-    ctx.lineWidth = 8 - Math.abs(i - 2.5);
-    ctx.beginPath();
-    ctx.moveTo(baseX * 0.5, -46);
-    ctx.quadraticCurveTo(baseX * 0.8, -24 - lift, baseX + reach, -2 - lift * 0.5);
-    ctx.stroke();
-    // curled tip
-    ctx.beginPath();
-    ctx.arc(baseX + reach, -4 - lift * 0.5, 3, 0, 5);
-    ctx.stroke();
+  const curves = [];
+  function skirt(xs, col, lw, front) {
+    ctx.strokeStyle = col;
+    for (let k = 0; k < xs.length; k++) {
+      const bx = xs[k], i = front ? k * 2 : k * 2 + 1;
+      const ph = crawl + i * 1.15;
+      const lift = Math.max(0, Math.cos(ph)) * 9;
+      let tx = bx + Math.sin(ph) * 13 + stompP * (bx > 0 ? 8 : -8);
+      let ty = -3 - lift * 0.5, cx = bx * 0.85, cy = -26 - lift;
+      if (whirl) {                          // centrifugal fan-out during the cyclone
+        const d = bx >= 0 ? 1 : -1;
+        tx = bx * 1.3 + d * (13 + Math.sin(now / 90 + i * 2) * 3);
+        ty = -10 - Math.abs(bx) * 0.15;
+        cx = bx * 1.2 + d * 5; cy = -30;
+      }
+      const c = [bx * 0.42, -43, cx, cy, tx, ty];
+      ctx.lineWidth = lw - Math.abs(bx) * 0.05;
+      ctx.beginPath(); ctx.moveTo(c[0], c[1]);
+      ctx.quadraticCurveTo(c[2], c[3], c[4], c[5]); ctx.stroke();
+      if (front) {                          // thin curling tip
+        const d2 = (whirl && bx < 0) ? -1 : 1;
+        ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.moveTo(tx, ty);
+        ctx.quadraticCurveTo(tx + 5 * d2, ty - 1, tx + 8 * d2, ty - 4 - lift * 0.3);
+        ctx.stroke();
+        curves.push(c);
+      }
+    }
+  }
+  skirt([-22, -4, 14], shade(body, -38), 7, false);
+  skirt([-32, -12, 8, 28], shade(body, -10), 8, true);
+  // sucker rows: small pale discs seated along the front tentacles
+  ctx.fillStyle = shade(belly, 12);
+  ctx.beginPath();
+  for (const c of curves) for (const s of [0.45, 0.65, 0.85]) {
+    const p = qp(c, s);
+    ctx.moveTo(p[0] + 1.6, p[1]); ctx.arc(p[0], p[1], 1.6, 0, 7);
+  }
+  ctx.fill();
+  // abyssal display: rings of light FLOW from mantle down every tentacle to its tip
+  if (abyssal) {
+    ctx.fillStyle = spineC;
+    for (let j = 0; j < 3; j++) {
+      const s = 0.3 + j * 0.26;
+      ctx.globalAlpha = 0.2 + 0.8 * Math.max(0, Math.sin(flow - s * 4.5));
+      ctx.beginPath();
+      for (const c of curves) {
+        const p = qp(c, s);
+        ctx.moveTo(p[0] + 2.2, p[1]); ctx.arc(p[0], p[1], 2.2, 0, 7);
+      }
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
   }
   ctx.lineWidth = 1;
 
-  // mantle: tall bulbous dome, widest above the middle
-  const squish = Math.sin(now / 500) * 2; // gelatinous pulse
-  const tg = ctx.createLinearGradient(-34, 0, 30, 0);
-  tg.addColorStop(0, shade(body, -30));
-  tg.addColorStop(0.55, body);
-  tg.addColorStop(1, shade(body, 18));
-  ctx.fillStyle = tg;
-  ctx.beginPath();
-  ctx.moveTo(-26, -44);
-  ctx.quadraticCurveTo(-38 - squish, -84, -22, -114);
-  ctx.quadraticCurveTo(-4, -136 - squish, 16, -122);
-  ctx.quadraticCurveTo(34 + squish, -100, 26, -66);
-  ctx.quadraticCurveTo(20, -46, -2, -42);
-  ctx.closePath(); ctx.fill();
-  // mantle fin flaps on top
-  ctx.fillStyle = shade(body, -15);
-  const finWave = Math.sin(now / 300) * 4;
-  ctx.beginPath();
-  ctx.moveTo(-14, -118);
-  ctx.quadraticCurveTo(-30, -132 + finWave, -20, -140 + finWave);
-  ctx.quadraticCurveTo(-10, -132, -6, -124);
-  ctx.closePath(); ctx.fill();
-  ctx.beginPath();
-  ctx.moveTo(4, -126);
-  ctx.quadraticCurveTo(14, -140 - finWave, 24, -134 - finWave);
-  ctx.quadraticCurveTo(20, -122, 12, -118);
-  ctx.closePath(); ctx.fill();
+  // ---- everything above compresses toward the ground on the body-slam ----
+  ctx.save();
+  ctx.translate(0, -40);
+  ctx.scale(1 + 0.12 * stompP, 1 - 0.2 * stompP);
+  ctx.translate(0, 40);
 
-  // pale underbelly with sucker rows
-  ctx.fillStyle = belly;
-  ctx.beginPath();
-  ctx.moveTo(18, -110);
-  ctx.quadraticCurveTo(30, -88, 22, -60);
-  ctx.quadraticCurveTo(16, -48, 2, -46);
-  ctx.quadraticCurveTo(12, -76, 10, -104);
-  ctx.closePath(); ctx.fill();
-  ctx.fillStyle = shade(belly, -30);
-  for (let r = 0; r < 4; r++)
-    for (let c2 = 0; c2 < 2; c2++)
-      ctx.beginPath(), ctx.arc(10 + c2 * 8, -58 - r * 14, 2, 0, 7), ctx.fill();
-  // wet rim-light along the mantle's dark edge
-  ctx.strokeStyle = "rgba(200,240,255,0.25)"; ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(-26, -50);
-  ctx.quadraticCurveTo(-37 - squish, -84, -21, -112);
-  ctx.stroke(); ctx.lineWidth = 1;
-  // mottled skin texture patches
-  ctx.fillStyle = shade(body, -22);
-  for (const [mx, my, mr] of [[-14, -80, 5], [-22, -100, 4], [-4, -60, 4], [-8, -94, 3]]) {
-    ctx.beginPath(); ctx.ellipse(mx, my, mr, mr * 0.7, 0.4, 0, 7); ctx.fill();
-  }
-  // siphon tube puffing behind the mantle
-  ctx.fillStyle = shade(body, -18);
-  ctx.beginPath();
-  ctx.moveTo(-26, -66);
-  ctx.quadraticCurveTo(-38, -62, -36, -54);
-  ctx.lineTo(-28, -56);
-  ctx.closePath(); ctx.fill();
-  if (Math.sin(now / 500) > 0.5) {
-    ctx.fillStyle = "rgba(160,200,220,0.25)";
-    ctx.beginPath(); ctx.ellipse(-42, -56, 6 + Math.sin(now / 90) * 2, 3, 0.2, 0, 7); ctx.fill();
-  }
-
-  // bioluminescent spots — pulse when charged
-  ctx.fillStyle = charged ? "#aaffee" : spineC;
-  const spots = [[-18, -70], [-24, -92], [-10, -108], [-2, -122], [12, -114]];
-  spots.forEach(([px, py], i) => {
-    const glow = 0.5 + Math.sin(now / 250 + i * 1.3) * 0.5;
-    ctx.globalAlpha = charged ? 1 : 0.3 + glow * 0.6;
-    ctx.beginPath(); ctx.arc(px, py, 2.5 + glow, 0, 7); ctx.fill();
-  });
-  ctx.globalAlpha = 1;
-
-  // two big arm tentacles — the front one swipes
-  let armAng = 0.45;
+  // arm angle: swipe kinds (1 downward lash / 2 rising backhand / 3 flail)
+  let armAng = 0.72 + Math.sin(now / 380) * 0.08;
   if (o.swipeT > 0) {
     if (o.swipeKind === 2)      armAng = 0.9 - (0.42 - o.swipeT) * 7;
     else if (o.swipeKind === 3) armAng = 0.3 + Math.sin(o.swipeT * 10) * 1.0;
     else                        armAng = -1.2 + (0.38 - o.swipeT) * 6.5;
   }
-  // rear arm tentacle
-  drawArmTentacle(-0.2 + Math.sin(now / 400) * 0.15, shade(body, -25), 0.85);
-  // front arm tentacle
-  drawArmTentacle(armAng, body, 1);
+  if (whirl) armAng = 0.05 + Math.sin(now / 100) * 0.1;  // flung flat by the spin
 
-  // one huge eye with a slit pupil — tracks forward, under a hooded brow
-  const eyeY = -96;
-  ctx.fillStyle = shade(body, -25);                     // fleshy brow hood
-  ctx.beginPath(); ctx.ellipse(10, eyeY - 9, 15, 6, 0.1, Math.PI, 0); ctx.fill();
-  ctx.fillStyle = "#e8f0e0";
-  ctx.beginPath(); ctx.ellipse(10, eyeY, 13, 11, 0, 0, 7); ctx.fill();
-  ctx.fillStyle = o.breathing ? t.beam : "#ffcc33";
-  ctx.beginPath(); ctx.ellipse(13, eyeY, 8, 8, 0, 0, 7); ctx.fill();
-  ctx.strokeStyle = "rgba(120,60,10,0.5)";              // iris ring
-  ctx.beginPath(); ctx.ellipse(13, eyeY, 8, 8, 0, 0, 7); ctx.stroke();
-  ctx.fillStyle = "#0a0a0a";
-  ctx.beginPath(); ctx.ellipse(14, eyeY, 2.5, 7, 0, 0, 7); ctx.fill();
-  ctx.fillStyle = "rgba(255,255,255,0.85)";             // wet glint
-  ctx.beginPath(); ctx.arc(9, eyeY - 4, 2, 0, 7); ctx.fill();
-  // heavy lid when hurt
-  if (o.hurt) {
-    ctx.fillStyle = body;
-    ctx.beginPath(); ctx.ellipse(10, eyeY - 6, 13, 5, 0, Math.PI, 0); ctx.fill();
-  }
-  // beak below the eye
-  ctx.fillStyle = "#2a2018";
-  const beakOpen = o.breathing ? 4 : 1;
-  ctx.beginPath();
-  ctx.moveTo(20, -74); ctx.lineTo(30, -70 - beakOpen); ctx.lineTo(22, -68);
-  ctx.closePath(); ctx.fill();
-  ctx.beginPath();
-  ctx.moveTo(20, -66); ctx.lineTo(28, -64 + beakOpen); ctx.lineTo(20, -60);
-  ctx.closePath(); ctx.fill();
-
-  function drawArmTentacle(ang, color, sc) {
+  function drawArm(ang, col, sc) {
     ctx.save();
-    ctx.translate(14, -82);
-    ctx.rotate(ang);
-    ctx.scale(sc, sc);
-    const wig = Math.sin(now / 150) * 7;
-    ctx.strokeStyle = color; ctx.lineCap = "round";
-    ctx.lineWidth = 10;
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.quadraticCurveTo(16, 8 + wig * 0.4, 30, 4);
-    ctx.stroke();
+    ctx.translate(4, -76); ctx.rotate(ang); ctx.scale(sc, sc);
+    const wig = Math.sin(now / 140 + sc * 9) * 6;
+    ctx.strokeStyle = col;
+    ctx.lineWidth = 11;
+    ctx.beginPath(); ctx.moveTo(0, 0);
+    ctx.quadraticCurveTo(11, 9 + wig * 0.3, 21, 5); ctx.stroke();
     ctx.lineWidth = 6;
+    ctx.beginPath(); ctx.moveTo(21, 5);
+    ctx.quadraticCurveTo(29, 1 - wig, 37, 3 + wig * 0.6); ctx.stroke();
+    // flattened club end
+    ctx.save();
+    ctx.translate(39, 3 + wig * 0.6); ctx.rotate(0.22 + wig * 0.02);
+    ctx.fillStyle = col;
+    ctx.beginPath(); ctx.ellipse(4, 0, 8.5, 4.2, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = spineC;                 // club photophore
+    ctx.globalAlpha = abyssal ? (charged ? 1 : 0.9) : 0.15 + 0.08 * idle;
+    ctx.beginPath(); ctx.ellipse(6, 0, 4, 1.8, 0, 0, 7); ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.restore();
+    // sucker discs down the underside
+    ctx.fillStyle = shade(belly, 8);
     ctx.beginPath();
-    ctx.moveTo(30, 4);
-    ctx.quadraticCurveTo(42, 0 - wig, 52, 4 + wig);
-    ctx.stroke();
-    ctx.lineWidth = 1;
-    // suckers along the underside
-    ctx.fillStyle = shade(color, 35);
-    for (let i = 0; i < 4; i++)
-      ctx.beginPath(), ctx.arc(10 + i * 11, 8 - i * 1.5, 1.8, 0, 7), ctx.fill();
-    // glowing club tip
-    ctx.fillStyle = charged ? "#aaffee" : spineC;
-    ctx.beginPath(); ctx.arc(52, 4 + wig, 4.5, 0, 7); ctx.fill();
+    for (let i = 0; i < 4; i++) {
+      const sx = 8 + i * 8, sy = 8 - i * 1.2 + wig * 0.15;
+      ctx.moveTo(sx + 1.6, sy); ctx.arc(sx, sy, 1.6, 0, 7);
+    }
+    ctx.fill();
     ctx.restore();
   }
-}
+  // rear arm tentacle, behind the mantle
+  drawArm(whirl ? -0.35 : 0.3 + Math.sin(now / 420) * 0.14, shade(body, -30), 0.82);
 
-// ---- MEKAGORA: unlockable war machine — plated hull, piston legs, reactor core ----
+  // trailing crown membranes, waving behind the mantle
+  const fw = Math.sin(now / 260) * 5;
+  ctx.fillStyle = shade(body, -24);
+  ctx.beginPath();
+  ctx.moveTo(-8, -121);
+  ctx.quadraticCurveTo(-28, -132 + fw, -41, -124 + fw);
+  ctx.quadraticCurveTo(-27, -114, -14, -111);
+  ctx.closePath(); ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(-14, -106);
+  ctx.quadraticCurveTo(-33, -111 - fw, -43, -100 - fw);
+  ctx.quadraticCurveTo(-29, -93, -18, -93);
+  ctx.closePath(); ctx.fill();
+
+  // ---- mantle-crown: tall, tapering, heavy with depth ----
+  const mg = ctx.createLinearGradient(-36, 0, 28, 0);
+  mg.addColorStop(0, shade(body, -32));
+  mg.addColorStop(0.55, body);
+  mg.addColorStop(1, shade(body, 16));
+  ctx.fillStyle = mg;
+  ctx.beginPath();
+  ctx.moveTo(-24, -42);
+  ctx.quadraticCurveTo(-40 - squish, -70, -31, -98);
+  ctx.quadraticCurveTo(-20, -122, -2, -130 - squish);
+  ctx.quadraticCurveTo(11, -121, 20, -103);
+  ctx.quadraticCurveTo(30 + squish, -80, 24, -58);
+  ctx.quadraticCurveTo(18, -44, -4, -40);
+  ctx.closePath(); ctx.fill();
+
+  // pale throat/belly panel down the face-side
+  ctx.fillStyle = belly;
+  ctx.beginPath();
+  ctx.moveTo(15, -102);
+  ctx.quadraticCurveTo(27, -82, 22, -60);
+  ctx.quadraticCurveTo(17, -46, 0, -42);
+  ctx.quadraticCurveTo(10, -68, 7, -96);
+  ctx.closePath(); ctx.fill();
+
+  // mottled ancient hide
+  ctx.fillStyle = shade(body, -22);
+  ctx.beginPath();
+  for (const [mx, my, mr] of [[-16, -78, 5], [-22, -100, 4], [-6, -60, 4], [-10, -114, 3], [2, -122, 2.5]]) {
+    ctx.moveTo(mx + mr, my); ctx.ellipse(mx, my, mr, mr * 0.7, 0.4, 0, 7);
+  }
+  ctx.fill();
+  // old scars raked across the flank
+  ctx.strokeStyle = shade(body, -45); ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(-18, -72); ctx.lineTo(-9, -63);
+  ctx.moveTo(-15, -74); ctx.lineTo(-6, -65);
+  ctx.moveTo(5, -112); ctx.lineTo(11, -105);
+  ctx.stroke();
+  // barnacle clusters crusted on the crown and shoulder
+  ctx.fillStyle = shade(belly, 22);
+  const barn = [[-25, -95, 3], [-21, -100, 2.2], [-27, -89, 2], [-7, -120, 2.4], [-3, -116, 1.8], [-11, -117, 1.6]];
+  ctx.beginPath();
+  for (const [bx, by, br] of barn) { ctx.moveTo(bx + br, by); ctx.arc(bx, by, br, 0, 7); }
+  ctx.fill();
+  ctx.fillStyle = shade(belly, -35);
+  ctx.beginPath();
+  for (const [bx, by, br] of barn) { ctx.moveTo(bx + br * 0.4, by); ctx.arc(bx, by, br * 0.4, 0, 7); }
+  ctx.fill();
+  // wet rim-light down the dark rear edge
+  ctx.strokeStyle = "rgba(200,240,255,0.22)"; ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(-25, -50);
+  ctx.quadraticCurveTo(-38 - squish, -72, -30, -97);
+  ctx.quadraticCurveTo(-20, -120, -3, -128);
+  ctx.stroke();
+
+  // siphon tube venting behind the mantle
+  ctx.fillStyle = shade(body, -18);
+  ctx.beginPath();
+  ctx.moveTo(-25, -64);
+  ctx.quadraticCurveTo(-38, -60, -36, -52);
+  ctx.lineTo(-27, -55);
+  ctx.closePath(); ctx.fill();
+  if (Math.sin(now / 500) > 0.5) {
+    ctx.fillStyle = "rgba(160,200,220,0.22)";
+    ctx.beginPath(); ctx.ellipse(-42, -54, 6 + Math.sin(now / 90) * 2, 3, 0.2, 0, 7); ctx.fill();
+  }
+
+  // head-mantle veins: faint threads normally, blazing conduits when abyssal
+  ctx.strokeStyle = abyssal ? t.beam : shade(body, -40);
+  ctx.globalAlpha = abyssal ? 0.55 + idle * 0.1 + (charged ? 0.35 : 0) : 0.3;
+  ctx.lineWidth = 1.3;
+  ctx.beginPath();
+  ctx.moveTo(-2, -127); ctx.quadraticCurveTo(-9, -112, -7, -96);
+  ctx.quadraticCurveTo(-6, -84, -11, -72);
+  ctx.moveTo(-7, -108); ctx.quadraticCurveTo(-15, -102, -19, -92);
+  ctx.moveTo(-7, -96); ctx.quadraticCurveTo(1, -88, 1, -78);
+  ctx.stroke();
+  ctx.globalAlpha = 1; ctx.lineWidth = 1;
+
+  // photophores tracing the crown edge — dim idle pulse in the deep, ablaze when abyssal
+  ctx.fillStyle = spineC;
+  const spots = [[-20, -62], [-26, -83], [-22, -103], [-12, -119], [-2, -126], [8, -115]];
+  spots.forEach(([px, py], i) => {
+    ctx.globalAlpha = abyssal
+      ? 0.7 + 0.3 * Math.sin(flow - i * 0.9)
+      : 0.09 + 0.09 * (0.5 + 0.5 * Math.sin(now / 900 + i * 1.7));
+    ctx.beginPath(); ctx.arc(px, py, abyssal ? 2.8 : 2, 0, 7); ctx.fill();
+  });
+  ctx.globalAlpha = 1;
+  if (abyssal && charged) {                 // accent flash: white-hot cores
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    for (const [px, py] of spots) { ctx.moveTo(px + 1.2, py); ctx.arc(px, py, 1.2, 0, 7); }
+    ctx.fill();
+  }
+
+  // ---- the eye: one huge baleful lantern under a heavy hooded lid ----
+  const eyeX = 11, eyeY = -92;
+  ctx.fillStyle = "#d8d2be";                                  // wet sclera
+  ctx.beginPath(); ctx.ellipse(eyeX, eyeY, 12.5, 10, -0.06, 0, 7); ctx.fill();
+  ctx.fillStyle = (abyssal || o.breathing) ? t.beam : shade(spineC, -60);
+  ctx.beginPath(); ctx.ellipse(eyeX + 3, eyeY + 0.5, 8.5, 8, 0, 0, 7); ctx.fill();
+  ctx.strokeStyle = "rgba(8,18,14,0.6)";                      // iris ring
+  ctx.beginPath(); ctx.ellipse(eyeX + 3, eyeY + 0.5, 8.5, 8, 0, 0, 7); ctx.stroke();
+  ctx.fillStyle = "#050505";                                  // horizontal slit pupil
+  ctx.beginPath();
+  ctx.ellipse(eyeX + 4, eyeY + 0.5, 6.5, (o.breathing || abyssal) ? 3.2 : 2.2, 0, 0, 7);
+  ctx.fill();
+  ctx.fillStyle = "rgba(255,255,255,0.9)";                    // wet glints
+  ctx.beginPath();
+  ctx.arc(eyeX - 3, eyeY - 3.5, 2, 0, 7);
+  ctx.moveTo(eyeX + 9, eyeY + 3); ctx.arc(eyeX + 8, eyeY + 3, 1, 0, 7);
+  ctx.fill();
+  // heavy fleshy hood cutting across the top third — ancient, half-lidded malice
+  ctx.fillStyle = shade(body, -26);
+  ctx.beginPath();
+  ctx.moveTo(eyeX - 14, eyeY - 3);
+  ctx.quadraticCurveTo(eyeX - 4, eyeY - 15, eyeX + 9, eyeY - 11);
+  ctx.quadraticCurveTo(eyeX + 14, eyeY - 9.5, eyeX + 14.5, eyeY - 5);
+  ctx.quadraticCurveTo(eyeX + 4, eyeY - 8.5, eyeX - 14, eyeY - 3);
+  ctx.closePath(); ctx.fill();
+  if (charged) {                                              // accent: eye rim flares
+    ctx.strokeStyle = spineC; ctx.globalAlpha = 0.8; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.ellipse(eyeX, eyeY, 16, 13, 0, 0, 7); ctx.stroke();
+    ctx.globalAlpha = 1; ctx.lineWidth = 1;
+  }
+  if (o.hurt) {                                               // heavy lid + pained creases
+    ctx.fillStyle = shade(body, -12);
+    ctx.beginPath(); ctx.ellipse(eyeX, eyeY - 4, 14.5, 7.5, 0, Math.PI, 0); ctx.fill();
+    ctx.strokeStyle = "rgba(8,14,11,0.55)"; ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(eyeX - 14, eyeY + 8); ctx.lineTo(eyeX - 8, eyeY + 5);
+    ctx.moveTo(eyeX + 13, eyeY + 9); ctx.lineTo(eyeX + 8, eyeY + 6);
+    ctx.moveTo(eyeX - 15, eyeY - 10); ctx.lineTo(eyeX - 9, eyeY - 7);
+    ctx.stroke(); ctx.lineWidth = 1;
+  }
+
+  // ---- beak below the eye — a real chitin hook, opening on the breath with a lit maw ----
+  const beakOpen = o.breathing ? 4 + Math.sin(now / 120) : 0;
+  if (o.breathing) {
+    ctx.fillStyle = t.beam; ctx.globalAlpha = 0.85;
+    ctx.beginPath(); ctx.ellipse(24, -63, 7, 3.5 + beakOpen * 0.5, 0, 0, 7); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+  ctx.fillStyle = "#1c1610";
+  ctx.beginPath();                          // upper hook, curving down at the tip
+  ctx.moveTo(14, -72);
+  ctx.quadraticCurveTo(30, -74, 34, -66 - beakOpen);
+  ctx.quadraticCurveTo(33, -62 - beakOpen, 29, -63 - beakOpen);
+  ctx.quadraticCurveTo(22, -66 - beakOpen * 0.5, 15, -66);
+  ctx.closePath(); ctx.fill();
+  ctx.beginPath();                          // lower mandible, tucked
+  ctx.moveTo(15, -57 + beakOpen * 0.4);
+  ctx.quadraticCurveTo(24, -58 + beakOpen, 30, -57 + beakOpen);
+  ctx.quadraticCurveTo(25, -52 + beakOpen, 16, -53 + beakOpen * 0.4);
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = "rgba(225,218,195,0.4)"; ctx.lineWidth = 1.2;
+  ctx.beginPath();                          // worn keratin edge-light so it reads
+  ctx.moveTo(15, -71.5);
+  ctx.quadraticCurveTo(29, -73.3, 33.3, -66 - beakOpen);
+  ctx.stroke(); ctx.lineWidth = 1;
+
+  // white motion smear for the lash (1) and rising backhand (2)
+  if (o.swipeT > 0 && o.swipeKind !== 3) {
+    ctx.strokeStyle = "rgba(255,255,255,0.35)"; ctx.lineWidth = 5;
+    ctx.beginPath();
+    if (o.swipeKind === 2) ctx.arc(4, -76, 42, armAng, armAng + 1.0);
+    else                   ctx.arc(4, -76, 42, armAng - 1.0, armAng);
+    ctx.stroke(); ctx.lineWidth = 1;
+  }
+  // front arm tentacle, over everything
+  drawArm(armAng, body, 1);
+
+  ctx.restore();
+  ctx.lineWidth = 1;
+}
 function drawMekagoraBody(t, o, body, belly, spineC, charged) {
   const now = performance.now();
   const legA = Math.sin((o.walk || 0) * 2) * 6;
