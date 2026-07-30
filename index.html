@@ -5323,15 +5323,47 @@ function drawBuildings(city) {
       ctx.fillRect(bx, by, b.w, 10);
       smokeStatic(bx + b.w / 2, by);
     }
-    // fire
+    // fire: layered tongues licking off the roofline, deterministic per building
+    // so the flames dance in place instead of teleporting
     if (b.burn > 0) {
-      ctx.fillStyle = `rgba(255,${120 + Math.random() * 80 | 0},30,0.8)`;
-      const fx = bx + b.w * (0.3 + Math.sin(performance.now() / 120) * 0.15);
-      ctx.beginPath();
-      ctx.moveTo(fx - 7, by + 20);
-      ctx.lineTo(fx, by + 20 - 16 - Math.random() * 8);
-      ctx.lineTo(fx + 7, by + 20);
-      ctx.closePath(); ctx.fill();
+      const now2 = performance.now();
+      const seed = b.x * 0.13;
+      const inten = Math.min(1, b.burn / 1.5);       // fires gutter out, not vanish
+      const nT = Math.max(2, Math.min(4, Math.round(b.w / 20)));
+      // warm glow washing the roofline
+      ctx.fillStyle = "rgba(255,150,50," + (inten * (0.13 + 0.05 * Math.sin(now2 / 130 + seed))).toFixed(3) + ")";
+      ctx.beginPath(); ctx.ellipse(bx + b.w / 2, by + 8, b.w * 0.62, 26, 0, 0, 7); ctx.fill();
+      // the top floors flicker hot from inside
+      ctx.fillStyle = "rgba(255,120,30," + (inten * (0.10 + 0.06 * Math.sin(now2 / 70 + seed * 2))).toFixed(3) + ")";
+      ctx.fillRect(bx, by, b.w, Math.min(b.h, 34));
+      for (let f = 0; f < nT; f++) {
+        const fx = bx + b.w * ((f + 0.5) / nT) + Math.sin(now2 / 300 + seed + f * 5) * 2;
+        const ph = now2 / 110 + seed + f * 2.61;
+        const hgt = (14 + 9 * (0.6 + 0.4 * Math.sin(ph))) * (f === 0 || f === nT - 1 ? 0.8 : 1.15) * inten;
+        const lean = Math.sin(now2 / 240 + seed + f) * 3;
+        const wdt = (6 + (f % 2) * 2) * (0.5 + inten * 0.5);
+        ctx.fillStyle = "rgba(255,110,20,0.85)";     // outer tongue, curvy
+        ctx.beginPath();
+        ctx.moveTo(fx - wdt, by + 16);
+        ctx.quadraticCurveTo(fx - wdt * 0.9, by + 8 - hgt * 0.45, fx + lean, by + 14 - hgt);
+        ctx.quadraticCurveTo(fx + wdt * 0.9, by + 8 - hgt * 0.45, fx + wdt, by + 16);
+        ctx.closePath(); ctx.fill();
+        ctx.fillStyle = "rgba(255,225,120,0.9)";     // hot yellow core
+        ctx.beginPath();
+        ctx.moveTo(fx - wdt * 0.45, by + 15);
+        ctx.quadraticCurveTo(fx - wdt * 0.4, by + 10 - hgt * 0.3, fx + lean * 0.6, by + 14 - hgt * 0.62);
+        ctx.quadraticCurveTo(fx + wdt * 0.45, by + 10 - hgt * 0.3, fx + wdt * 0.45, by + 15);
+        ctx.closePath(); ctx.fill();
+      }
+      // embers streaming upward off the blaze
+      ctx.fillStyle = "#ffcc66";
+      for (let e = 0; e < 3; e++) {
+        const ph = ((now2 / 900) + e * 0.37 + Math.abs(seed) % 1) % 1;
+        ctx.globalAlpha = (1 - ph) * 0.8 * inten;
+        ctx.fillRect(bx + b.w * (0.2 + 0.6 * ((e * 2.7 + Math.abs(seed)) % 1)) + Math.sin(ph * 9 + e) * 4,
+                     by + 12 - ph * 46, 2, 2);
+      }
+      ctx.globalAlpha = 1;
     }
     if (toppling) ctx.restore();
   }
