@@ -5323,45 +5323,66 @@ function drawBuildings(city) {
       ctx.fillRect(bx, by, b.w, 10);
       smokeStatic(bx + b.w / 2, by);
     }
-    // fire: layered tongues licking off the roofline, deterministic per building
-    // so the flames dance in place instead of teleporting
+    // fire: one continuous blaze across the roofline — three heat layers of
+    // undulating tongues whose peaks rise and waver, plus glow, embers and
+    // detached flamelets. Deterministic per building so it dances in place.
     if (b.burn > 0) {
       const now2 = performance.now();
       const seed = b.x * 0.13;
       const inten = Math.min(1, b.burn / 1.5);       // fires gutter out, not vanish
-      const nT = Math.max(2, Math.min(4, Math.round(b.w / 20)));
-      // warm glow washing the roofline
-      ctx.fillStyle = "rgba(255,150,50," + (inten * (0.13 + 0.05 * Math.sin(now2 / 130 + seed))).toFixed(3) + ")";
-      ctx.beginPath(); ctx.ellipse(bx + b.w / 2, by + 8, b.w * 0.62, 26, 0, 0, 7); ctx.fill();
-      // the top floors flicker hot from inside
-      ctx.fillStyle = "rgba(255,120,30," + (inten * (0.10 + 0.06 * Math.sin(now2 / 70 + seed * 2))).toFixed(3) + ")";
-      ctx.fillRect(bx, by, b.w, Math.min(b.h, 34));
-      for (let f = 0; f < nT; f++) {
-        const fx = bx + b.w * ((f + 0.5) / nT) + Math.sin(now2 / 300 + seed + f * 5) * 2;
-        const ph = now2 / 110 + seed + f * 2.61;
-        const hgt = (14 + 9 * (0.6 + 0.4 * Math.sin(ph))) * (f === 0 || f === nT - 1 ? 0.8 : 1.15) * inten;
-        const lean = Math.sin(now2 / 240 + seed + f) * 3;
-        const wdt = (6 + (f % 2) * 2) * (0.5 + inten * 0.5);
-        ctx.fillStyle = "rgba(255,110,20,0.85)";     // outer tongue, curvy
+      const baseY = by + 14;
+      const N = Math.max(2, Math.min(5, Math.round(b.w / 16)));
+      // glow halo + the top floors flickering hot from inside
+      ctx.fillStyle = "rgba(255,150,50," + (inten * (0.16 + 0.06 * Math.sin(now2 / 130 + seed))).toFixed(3) + ")";
+      ctx.beginPath(); ctx.ellipse(bx + b.w / 2, by + 4, b.w * 0.7, 30, 0, 0, 7); ctx.fill();
+      ctx.fillStyle = "rgba(255,120,30," + (inten * (0.12 + 0.07 * Math.sin(now2 / 70 + seed * 2))).toFixed(3) + ")";
+      ctx.fillRect(bx, by, b.w, Math.min(b.h, 38));
+      // the flame body: peaks animated by two interfering waves, tips leaning
+      const peakH = f => Math.max(7, 17 + 11 * Math.sin(now2 / 95 + seed + f * 2.2)
+                                       + 6 * Math.sin(now2 / 230 + seed * 2 + f * 1.3))
+                         * (f === 0 || f === N - 1 ? 0.72 : 1) * inten;
+      const lean = f => Math.sin(now2 / 260 + seed + f * 1.7) * 4;
+      const layer = (hs, inset, col) => {
+        const x0 = bx + inset, x1 = bx + b.w - inset;
+        ctx.fillStyle = col;
         ctx.beginPath();
-        ctx.moveTo(fx - wdt, by + 16);
-        ctx.quadraticCurveTo(fx - wdt * 0.9, by + 8 - hgt * 0.45, fx + lean, by + 14 - hgt);
-        ctx.quadraticCurveTo(fx + wdt * 0.9, by + 8 - hgt * 0.45, fx + wdt, by + 16);
+        ctx.moveTo(x0, baseY);
+        for (let f = 0; f < N; f++) {
+          const p0 = x0 + ((x1 - x0) * f) / N;
+          const p1 = x0 + ((x1 - x0) * (f + 1)) / N;
+          const tip = (p0 + p1) / 2 + lean(f) * hs;
+          const hp = peakH(f) * hs;
+          ctx.quadraticCurveTo(p0 + (tip - p0) * 0.35, baseY - hp * 0.3, tip, baseY - hp);
+          ctx.quadraticCurveTo(p1 - (p1 - tip) * 0.35, baseY - hp * 0.3, p1, baseY);
+        }
         ctx.closePath(); ctx.fill();
-        ctx.fillStyle = "rgba(255,225,120,0.9)";     // hot yellow core
-        ctx.beginPath();
-        ctx.moveTo(fx - wdt * 0.45, by + 15);
-        ctx.quadraticCurveTo(fx - wdt * 0.4, by + 10 - hgt * 0.3, fx + lean * 0.6, by + 14 - hgt * 0.62);
-        ctx.quadraticCurveTo(fx + wdt * 0.45, by + 10 - hgt * 0.3, fx + wdt * 0.45, by + 15);
-        ctx.closePath(); ctx.fill();
-      }
-      // embers streaming upward off the blaze
-      ctx.fillStyle = "#ffcc66";
+      };
+      layer(1.5,  1, "rgba(255,80,10,0.72)");        // deep outer blaze
+      layer(1.05, 3, "rgba(255,150,25,0.9)");        // orange body
+      layer(0.55, 6, "rgba(255,235,140,0.95)");      // white-hot heart
+      // detached flamelets pinching off the peaks and rising
       for (let e = 0; e < 3; e++) {
-        const ph = ((now2 / 900) + e * 0.37 + Math.abs(seed) % 1) % 1;
-        ctx.globalAlpha = (1 - ph) * 0.8 * inten;
-        ctx.fillRect(bx + b.w * (0.2 + 0.6 * ((e * 2.7 + Math.abs(seed)) % 1)) + Math.sin(ph * 9 + e) * 4,
-                     by + 12 - ph * 46, 2, 2);
+        const ph = ((now2 / 620) + e * 0.34 + Math.abs(seed) % 1) % 1;
+        const fx = bx + b.w * (0.25 + 0.5 * ((e * 2.13 + Math.abs(seed)) % 1)) + Math.sin(ph * 7 + e) * 5;
+        const fy = baseY - 20 * inten - ph * 30;
+        const fr = (1 - ph) * 3.4 * inten;
+        if (fr > 0.8) {
+          ctx.fillStyle = "rgba(255,150,30," + (0.75 * (1 - ph)).toFixed(2) + ")";
+          ctx.beginPath();
+          ctx.moveTo(fx - fr, fy);
+          ctx.quadraticCurveTo(fx - fr * 0.4, fy - fr * 2.4, fx, fy - fr * 3);
+          ctx.quadraticCurveTo(fx + fr * 0.4, fy - fr * 2.4, fx + fr, fy);
+          ctx.arc(fx, fy, fr, 0, Math.PI);
+          ctx.fill();
+        }
+      }
+      // sparks streaming up on the wind
+      ctx.fillStyle = "#ffd070";
+      for (let e = 0; e < 4; e++) {
+        const ph = ((now2 / 800) + e * 0.27 + Math.abs(seed) % 1) % 1;
+        ctx.globalAlpha = (1 - ph) * 0.85 * inten;
+        ctx.fillRect(bx + b.w * (0.15 + 0.7 * ((e * 2.7 + Math.abs(seed)) % 1)) + Math.sin(ph * 9 + e * 2) * 6,
+                     baseY - 6 - ph * 52, 2, 2);
       }
       ctx.globalAlpha = 1;
     }
