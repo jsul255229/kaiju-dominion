@@ -11454,14 +11454,19 @@ function drawMekagoraBody(t, o, body, belly, spineC, charged) {
     ctx.moveTo(ax + 2, fy - 5); ctx.lineTo(ax + 9, fy); ctx.lineTo(ax + 1, fy);
     ctx.moveTo(ax - 8, fy - 4); ctx.lineTo(ax - 13, fy); ctx.lineTo(ax - 6, fy);
     ctx.closePath(); ctx.fill();
-    // hip servo disc + hub light (near leg only, overlaps hull)
+    // pelvic fairing: a wide flat armor plate over the hip joint (near leg only)
     if (!far) {
-      ctx.fillStyle = dk;
-      ctx.beginPath(); ctx.arc(hx, -51, 6.5, 0, 7); ctx.fill();
-      ctx.strokeStyle = "rgba(230,238,246,0.4)";
-      ctx.beginPath(); ctx.arc(hx, -51, 3.5, 0, 7); ctx.stroke();
+      ctx.fillStyle = shade(col, -18);
+      ctx.beginPath();
+      ctx.moveTo(hx - 10, -57);
+      ctx.lineTo(hx + 10, -55);
+      ctx.lineTo(hx + 5, -42);
+      ctx.lineTo(hx - 6, -43);
+      ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = "rgba(8,12,22,0.55)";
+      ctx.beginPath(); ctx.moveTo(hx - 7, -51); ctx.lineTo(hx + 6, -50); ctx.stroke();
       ctx.fillStyle = overdrive ? accent : "rgba(255,51,85,0.35)";
-      ctx.fillRect(hx - 1, -52, 2, 2);
+      ctx.fillRect(hx - 2, -49, 4, 2);
     }
   }
 }
