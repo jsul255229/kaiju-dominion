@@ -89,7 +89,7 @@ const QUALITY = [
   { dpr: 0.80, parts: 200, shimmer: false, clouds: true },
   { dpr: 1.00, parts: 300, shimmer: true,  clouds: true }
 ];
-let qTier = 2;
+let qTier = Math.max(0, Math.min(2, safeGet("kdQ", 2)));   // the device remembers its speed
 let lastRz = { w: 0, cw: 0, ch: 0 };
 let rzRetry = 0;
 function resize() {
@@ -130,6 +130,15 @@ if (window.visualViewport) {
   window.visualViewport.addEventListener("scroll", resizeSoon);
 }
 resize();
+
+// stepping away pauses the rampage — nobody comes back mid-barrage
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && state === S.PLAY) { state = S.PAUSE; pauseSel = 0; confirmWipe = false; }
+  try {
+    if (document.hidden && audioCtx && audioCtx.state === "running") audioCtx.suspend();
+    else if (!document.hidden && audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+  } catch (e) {}
+});
 
 // ---- text that never overflows its box ----
 // shrinks the font until the string fits, then draws it
@@ -840,6 +849,7 @@ function haptic(ms = 40, strong = 0.6) {
 const S = { MENU: 0, PLAY: 1, LEVELCLEAR: 2, OVER: 3, PAUSE: 4, WIN: 5, SELECT: 6, INTRO: 7, SHOP: 8, MAP: 9, SETTINGS: 10, UNLOCK: 11 };
 let pendingUnlock = null, unlockStamp = 0;   // new-kaiju celebration between recap and shop
 let overStamp = 0, overBtns = {};            // defeat screen: retry / give-up
+let secondWindUsed = false, heartT = 0, pauseBtn = null, delayed = [];
 const CLEAR_PCT = 0.6;      // share of the (now much larger) city that must fall
 const SWIFT_SEC = 165;      // "swift rampage" grade threshold, scaled to city size
 let state = S.MENU;
@@ -1170,6 +1180,7 @@ function resetLevel() {
   nukedThisLevel = false;
   quakes = []; fireCount = 0; firestormAlerted = false;
   navFleet = { seen: false, strikes: 0, volley: 0, shotT: 0, cd: 0, flashT: 0, smokeT: 0, gun: 0 }; navMarks = [];
+  secondWindUsed = false; heartT = 0; delayed = [];
   craters = [];
   levelTime = 0; landmarkFirstBonus = false;
   combo = 0; comboT = 0;
@@ -1416,8 +1427,20 @@ cv.addEventListener("pointerdown", e => {
     if (idx >= 0 && idx < PAUSE_ITEMS.length && p.y >= 136) pauseAction(idx);
     return;
   }
+  if (state === S.PLAY && pauseBtn && isTouch() && inRect(toGameClamped(e), pauseBtn)) {
+    state = S.PAUSE; pauseSel = 0; confirmWipe = false;
+    return;
+  }
   const p = toGame(e);
   touches[e.pointerId] = { x: p.x, y: p.y, sx: p.x, sy: p.y };
+  // a touch that starts on a button stays that button until lifted —
+  // thumb drift can no longer cancel a held beam
+  if (state === S.PLAY) {
+    const tt = touches[e.pointerId];
+    for (const bn of ["swipe", "stomp", "breath", "roar"]) {
+      if (btns[bn] && inBtn(tt, btns[bn])) { tt.btn = bn; break; }
+    }
+  }
 });
 // A tap that lands in the letterbox next to the canvas used to be swallowed
 // entirely — which is exactly how an edge-hugging button feels "broken".
@@ -1577,6 +1600,7 @@ function touchControls() {
   const out = { axis: 0, swipe: false, stomp: false, breath: false, roar: false };
   for (const id in touches) {
     const t = touches[id];
+    if (t.btn) { out[t.btn] = true; continue; }        // sticky press
     if (OPT.lefty ? t.sx > W * 0.55 : t.sx < W * 0.45) {
       // virtual stick: horizontal drag
       const dx = t.x - t.sx;
@@ -1674,6 +1698,20 @@ function update(dt) {
   levelTime += dt;
   if (comboT > 0) { comboT -= dt; if (comboT <= 0) combo = 0; }
   if (bossWarnT > 0) bossWarnT -= dt;
+  // low-health heartbeat
+  if (kaiju.hp > 0 && kaiju.hp < kaiju.maxHp * 0.3) {
+    heartT -= dt;
+    if (heartT <= 0) {
+      heartT = 0.9;
+      snd(46, 0.09, "sine", 0.22, -12);
+      setTimeout(() => { if (state === S.PLAY) snd(40, 0.11, "sine", 0.18, -10); }, 140);
+    }
+  } else heartT = 0;
+  // game-time delayed actions (salvos etc.) — they respect pause, unlike setTimeout
+  for (let i = delayed.length - 1; i >= 0; i--) {
+    delayed[i].t -= dt;
+    if (delayed[i].t <= 0) { const fn = delayed[i].fn; delayed.splice(i, 1); fn(); }
+  }
 
   const tc = touchControls();
   const k = kaiju;
@@ -2412,37 +2450,6 @@ function update(dt) {
         const t = 1.6; // flight time
         eBullets.push({ x: u.x, y: GROUND - 12, vx: dist / t, vy: -260, grav: 330, dmg: 6, bomb: true, kind: "heshell" });
       }
-    } else if (u.kind === "destroyer") {
-      // holds station in the shallows, lobbing shells the length of the city
-      u.bobT += dt;
-      u.fireT -= dt;
-      if (u.fireT <= 0 && Math.abs(k.x - u.x) < 1500) {
-        u.fireT = 3.6 + Math.random() * 1.5;
-        sfx.tank();
-        for (let s2 = 0; s2 < 2; s2++) {
-          const t2 = 1.7 + s2 * 0.14;
-          const dist2 = (k.x + (Math.random() - 0.5) * 130) - u.x;
-          setTimeout(() => { if (state === S.PLAY) {
-            eBullets.push({ x: u.x, y: GROUND - 22, vx: dist2 / t2, vy: -330, grav: 330, dmg: 6, bomb: true, kind: "heshell" }); } }, s2 * 220);
-        }
-      }
-    } else if (u.kind === "carrier") {
-      // the flat-top: scrambles strike jets, shells when the deck is clear
-      u.bobT += dt;
-      u.jetT -= dt;
-      u.fireT -= dt;
-      if (u.jetT <= 0 && units.filter(x2 => x2.kind === "jet").length < 4) {
-        u.jetT = 6.5 + Math.random() * 2;
-        const d2 = k.x > u.x ? 1 : -1;
-        units.push({ kind: "jet", v: milOf().jets[0], x: u.x + d2 * 40, y: 64 + Math.random() * 40,
-                     vx: d2 * 240, hp: 3, fireT: 0.5, dir: d2, dropped: false });
-        boom(u.x + d2 * 50, GROUND - 40, "#cfe0ea", 6, 60, 0);
-      }
-      if (u.fireT <= 0 && Math.abs(k.x - u.x) < 1500) {
-        u.fireT = 5 + Math.random() * 2;
-        const t2 = 1.8, dist2 = k.x - u.x;
-        eBullets.push({ x: u.x, y: GROUND - 30, vx: dist2 / t2, vy: -340, grav: 330, dmg: 7, bomb: true, kind: "heshell" });
-      }
     } else if (u.kind === "mlrs") {
       // rocket artillery: rolls to standoff range, then ripple-fires a salvo
       const dist0 = k.x - u.x;
@@ -2453,8 +2460,8 @@ function update(dt) {
         for (let s = 0; s < 4; s++) {
           const t = 1.8 + s * 0.12;
           const dist = (k.x + (Math.random() - 0.5) * 140) - u.x;
-          setTimeout(() => { if (state === S.PLAY) { sfx.tank();
-            eBullets.push({ x: u.x, y: GROUND - 34, vx: dist / t, vy: -320, grav: 340, dmg: 6, bomb: true, kind: "rocket" }); } }, s * 180);
+          delayed.push({ t: s * 0.18, fn: () => { sfx.tank();
+            eBullets.push({ x: u.x, y: GROUND - 34, vx: dist / t, vy: -320, grav: 340, dmg: 6, bomb: true, kind: "rocket" }); } });
         }
       }
     } else if (u.kind === "walker") {
@@ -2533,7 +2540,7 @@ function update(dt) {
   // arcing ordnance (naval and artillery shells) may legitimately fly in from
   // far off-screen — cull those against the world, everything else against the camera
   eBullets = eBullets.filter(b => !b.dead &&
-    (b.kind === "heshell" || b.kind === "missile"
+    (b.kind === "heshell" || b.kind === "missile" || b.kind === "rocket"
       ? b.x > -300 && b.x < worldW + 300
       : b.x > camX - 100 && b.x < camX + W + 100));
 
@@ -2589,6 +2596,18 @@ function update(dt) {
 }
 
 function endRun() {
+  // CUB gets one Second Wind per city — the young kaiju refuses to fall
+  if (DIF().id === "cub" && !secondWindUsed && state === S.PLAY) {
+    secondWindUsed = true;
+    kaiju.hp = kaiju.maxHp * 0.6;
+    kaiju.hurtT = 0.3;
+    kaiju.rage = Math.min(100, kaiju.rage + 30);
+    shake = Math.max(shake, 6);
+    sfx.roar();
+    float(kaiju.x, GROUND - 160, "SECOND WIND!", "#66ff99");
+    newsAlert("THE CREATURE RISES AGAIN", 2);
+    return;
+  }
   state = S.OVER;
   overStamp = performance.now();
   awardXP(Math.round(score / 40));
@@ -3004,7 +3023,7 @@ function damageUnit(u, dmg) {
     stats.units++;
     if (stats.units === 10) pushNews("armed forces taking heavy losses · reinforcements requested");
     if (stats.units === 25) pushNews("general retreat ordered — the creature cannot be stopped");
-    const ptsMap = { tank: 300, heli: 500, jet: 800, arty: 600, mlrs: 2500, destroyer: 1800, carrier: 3200, walker: 4000 };
+    const ptsMap = { tank: 300, heli: 500, jet: 800, arty: 600, mlrs: 2500, walker: 4000 };
     const pts = ptsMap[u.kind] || 300;
     const uy = (u.kind === "heli" || u.kind === "jet") ? u.y : GROUND - 24;
     addScore(pts, u.x, uy - 10, "#ffdd44");
@@ -3084,6 +3103,14 @@ function draw() {
     return;
   }
   drawHUD(city);
+  // low-health warning: a soft red pulse around the screen edge
+  if (state === S.PLAY && kaiju.hp > 0 && kaiju.hp < kaiju.maxHp * 0.3) {
+    const vp = 0.5 + Math.sin(performance.now() / 300) * 0.5;
+    ctx.strokeStyle = "rgba(255,40,50," + ((0.10 + vp * 0.10) * (OPT.reduceFlash ? 0.45 : 1)).toFixed(3) + ")";
+    ctx.lineWidth = 26;
+    ctx.strokeRect(-2, -2, W + 4, H + 4);
+    ctx.lineWidth = 1;
+  }
 
   if (killCam && state === S.PLAY) {   // cinematic bars during the kill cam
     ctx.fillStyle = "#000";
@@ -3162,22 +3189,6 @@ function drawHeatShimmer() {
   }
   ctx.stroke();
   ctx.lineWidth = 1;
-}
-
-function drawSpotlight() {
-  const lm = buildings.find(b => b.landmark);
-  if (!lm) return;
-  const cx2 = lm.x + lm.w / 2, top2 = GROUND - lm.h;
-  const g2 = ctx.createLinearGradient(cx2, top2 - 60, cx2, GROUND);
-  g2.addColorStop(0, "rgba(255,240,180,0.32)");
-  g2.addColorStop(1, "rgba(255,240,180,0)");
-  ctx.fillStyle = g2;
-  ctx.beginPath();
-  ctx.moveTo(cx2 - 16, top2 - 70);
-  ctx.lineTo(cx2 + 16, top2 - 70);
-  ctx.lineTo(cx2 + lm.w * 1.1, GROUND);
-  ctx.lineTo(cx2 - lm.w * 1.1, GROUND);
-  ctx.closePath(); ctx.fill();
 }
 
 function drawIntro(city) {
@@ -11822,55 +11833,6 @@ function drawUnits() {
       ctx.stroke(); ctx.lineWidth = 1;
       ctx.fillStyle = mil.flash;
       ctx.fillRect(u.x - 18, uy - 6, 4, 3);
-    } else if (u.kind === "destroyer" || u.kind === "carrier") {
-      const carrier = u.kind === "carrier";
-      const bob = Math.sin((u.bobT || 0) * 1.4) * 2;
-      const uy = GROUND - 4 + bob;
-      const L = carrier ? 62 : 44;
-      // wake + waterline
-      ctx.fillStyle = "rgba(230,250,255,0.35)";
-      ctx.beginPath(); ctx.ellipse(u.x, GROUND + 2, L + 12, 5, 0, 0, 7); ctx.fill();
-      // hull
-      ctx.fillStyle = carrier ? "#59626e" : "#66707c";
-      ctx.beginPath();
-      ctx.moveTo(u.x - L, uy - 12);
-      ctx.lineTo(u.x + L, uy - 12);
-      ctx.lineTo(u.x + L - 12, uy + 2);
-      ctx.lineTo(u.x - L + 10, uy + 2);
-      ctx.closePath(); ctx.fill();
-      ctx.fillStyle = "rgba(10,14,20,0.25)";
-      ctx.fillRect(u.x - L + 10, uy - 2, L * 2 - 22, 4);
-      if (carrier) {
-        // flat flight deck with parked airframes and the island
-        ctx.fillStyle = "#4c545e";
-        ctx.fillRect(u.x - L - 8, uy - 17, L * 2 + 16, 6);
-        ctx.strokeStyle = "rgba(230,235,240,0.5)";
-        for (let i = -2; i <= 2; i++) { ctx.beginPath(); ctx.moveTo(u.x + i * 24 - 8, uy - 14); ctx.lineTo(u.x + i * 24 + 8, uy - 14); ctx.stroke(); }
-        ctx.fillStyle = "#39414c";
-        ctx.fillRect(u.x + L * 0.35, uy - 30, 18, 13);      // island
-        ctx.fillRect(u.x + L * 0.35 + 6, uy - 36, 3, 6);    // mast
-        ctx.fillStyle = "#727c88";                          // parked jets
-        for (const px of [-L * 0.6, -L * 0.25, L * 0.05]) {
-          ctx.beginPath();
-          ctx.moveTo(u.x + px, uy - 18); ctx.lineTo(u.x + px + 10, uy - 20); ctx.lineTo(u.x + px, uy - 22);
-          ctx.closePath(); ctx.fill();
-        }
-      } else {
-        // destroyer: superstructure, radar mast, forward gun tracking the kaiju
-        ctx.fillStyle = "#57616d";
-        ctx.fillRect(u.x - 14, uy - 26, 30, 14);
-        ctx.fillRect(u.x + 18, uy - 20, 14, 8);
-        ctx.fillStyle = "#39414c";
-        ctx.fillRect(u.x - 2, uy - 34, 3, 9);
-        ctx.strokeStyle = "#39414c"; ctx.lineWidth = 3;
-        const aim = kaiju.x > u.x ? 1 : -1;
-        ctx.beginPath();
-        ctx.moveTo(u.x - L + 22, uy - 14);
-        ctx.lineTo(u.x - L + 22 + aim * 14, uy - 22);
-        ctx.stroke(); ctx.lineWidth = 1;
-        ctx.fillStyle = (milOf().flash || "#c02030");
-        ctx.fillRect(u.x + L - 22, uy - 10, 5, 3);
-      }
     } else if (u.kind === "mlrs") {
       // heavy multiple rocket launcher on an 8x8 truck chassis
       const uy = GROUND - 6;
@@ -12720,8 +12682,8 @@ function drawBroadcast(city) {
   if (boss && boss.hp > 0) { ctx.fillStyle = "#ff4477"; ctx.fillRect(mapAt(boss.x) - 1.5, pY + 4, 3, 12); }
   if (rival && rival.hp > 0) { ctx.fillStyle = "#c060ff"; ctx.fillRect(mapAt(rival.x) - 1.5, pY + 4, 3, 12); }
   for (const u of units) {                              // heavy threats worth broadcasting
-    if (u.kind !== "walker" && u.kind !== "mlrs" && u.kind !== "destroyer" && u.kind !== "carrier") continue;
-    ctx.fillStyle = u.kind === "destroyer" || u.kind === "carrier" ? "#6ab8e8" : "#ff8866";
+    if (u.kind !== "walker" && u.kind !== "mlrs") continue;
+    ctx.fillStyle = "#ff8866";
     ctx.fillRect(mapAt(u.x) - 1, pY + 6, 2, 9);
   }
   if (evt) {                                            // event markers ride the top edge
@@ -12864,6 +12826,29 @@ function drawHUD(city) {
     ctx.fillRect(W / 2 - 40, 52, 80 * Math.max(0, comboT / 3), 4);
   }
 
+  // ---- live S-rank goals: the four grade criteria tick in real time ----
+  if (state === S.PLAY) {
+    const gchips = [
+      ["SWIFT", levelTime < SWIFT_SEC, levelTime >= SWIFT_SEC],
+      ["TOUGH", stats.dmg < kaiju.maxHp * 0.35, stats.dmg >= kaiju.maxHp * 0.35],
+      ["COMBO", comboBest >= 15, false],
+      ["FIRST", landmarkFirstBonus, !landmarkFirstBonus && destroyedPct >= 0.3],
+    ];
+    ctx.font = "bold 7px monospace"; ctx.textAlign = "left";
+    gchips.forEach((c2, i) => {
+      const gx = 12 + i * 47, gy = 66;
+      const ok = c2[1], failed = c2[2];
+      ctx.globalAlpha = failed ? 0.5 : 1;
+      ctx.fillStyle = "rgba(14,18,30,0.75)";
+      ctx.fillRect(gx, gy, 43, 11);
+      ctx.strokeStyle = failed ? "#5a3038" : ok ? cbDone() : "#39405a";
+      ctx.strokeRect(gx, gy, 43, 11);
+      ctx.fillStyle = failed ? "#8a5a60" : ok ? cbDone() : "#7f8ba4";
+      ctx.fillText((failed ? "✕ " : ok ? "✓ " : "· ") + c2[0], gx + 3, gy + 8);
+    });
+    ctx.globalAlpha = 1;
+  }
+
   // boss health bar — held back until the intro banner has had its moment
   if (boss && boss.hp > 0 && boss.announced && bossWarnT <= 0) {
     ctx.textAlign = "center";
@@ -12899,11 +12884,25 @@ function drawHUD(city) {
     btns.swipe  = { x: bx1, y: H - 172, r: 30 };
     btns.stomp  = { x: bx2, y: H - 154, r: 26 };
     btns.breath = { x: bx1, y: H - 246, r: 26 };
-    btns.roar   = { x: bx2, y: H - 222, r: 22 };
+    btns.roar   = { x: bx2, y: H - 222, r: 26 };
+    // the pause chip the hint text has promised all along
+    pauseBtn = { x: W / 2 - 22, y: 6, w: 44, h: 26 };
+    ctx.fillStyle = "rgba(14,18,30,0.8)";
+    ctx.fillRect(pauseBtn.x, pauseBtn.y, pauseBtn.w, pauseBtn.h);
+    ctx.strokeStyle = "#6a76a0"; ctx.strokeRect(pauseBtn.x, pauseBtn.y, pauseBtn.w, pauseBtn.h);
+    ctx.fillStyle = "#b6c0d6"; ctx.font = "bold 12px monospace"; ctx.textAlign = "center";
+    ctx.fillText("❚❚", W / 2, pauseBtn.y + 18);
     const tcNow = touchControls();               // light up whatever's held
     drawBtn(btns.swipe, "CLAW", "#ffcc66", tcNow.swipe);
     drawBtn(btns.stomp, "STOMP", "#ff9966", tcNow.stomp);
-    drawBtn(btns.breath, "BEAM", "#66eeff", tcNow.breath);
+    const sCost = kaiju.type.special === "nova" ? 40 : kaiju.type.special === "dash" ? 30 : 1;
+    const sUlt = kaiju.rage >= 100;
+    drawBtn(btns.breath, sUlt ? "ULT!" : "BEAM", kaiju.rage >= sCost ? "#66eeff" : "#3d4452", tcNow.breath);
+    if (sUlt && Math.floor(performance.now() / 200) % 2) {
+      ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(btns.breath.x, btns.breath.y, btns.breath.r + 6, 0, 7); ctx.stroke();
+      ctx.lineWidth = 1;
+    }
     drawBtn(btns.roar, "ROAR", kaiju.roarCd > 0 ? "#666677" : "#ffdd44", tcNow.roar);
     // move hint zone
     // virtual joystick: rests at the natural thumb spot, snaps to wherever the
@@ -13862,6 +13861,9 @@ function drawMap() {
     ctx.fillText(clipText((MIL[c.mil] || MIL.usa).force, 210, 8), B.x + B.w - 14, panelY + 14);
     ctx.fillStyle = M.glow; ctx.font = "bold 10px monospace";
     ctx.fillText("⚙ " + M.name, B.x + B.w - 14, panelY + 29);
+    ctx.textAlign = "left";
+    ctx.fillStyle = "#c8a84a";
+    fitText("S-RANK: swift clear · under 35% damage · 15-hit combo · landmark first", B.x + 14, panelY + 43, B.w - 28, 8);
   } else {
     ctx.fillText("raze " + mapSel + " cities to open this front", B.x + 14, panelY + 31);
   }
@@ -13924,8 +13926,8 @@ function frame(now) {
     perfAcc += rawMs; perfN++;
     if (perfN >= 75) {
       const avg = perfAcc / perfN; perfAcc = 0; perfN = 0;
-      if (avg > 27 && qTier > 0) { qTier--; resize(); perfGood = 0; }
-      else if (avg < 15 && qTier < 2 && ++perfGood >= 3) { qTier++; resize(); perfGood = 0; }
+      if (avg > 27 && qTier > 0) { qTier--; resize(); perfGood = 0; try { localStorage.setItem("kdQ", qTier); } catch (e2) {} }
+      else if (avg < 15 && qTier < 2 && ++perfGood >= 3) { qTier++; resize(); perfGood = 0; try { localStorage.setItem("kdQ", qTier); } catch (e2) {} }
       else if (avg >= 15) perfGood = 0;
     }
   }
