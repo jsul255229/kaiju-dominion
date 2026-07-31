@@ -11059,89 +11059,205 @@ function drawKrakenothBody(t, o, body, belly, spineC, charged) {
 }
 function drawMekagoraBody(t, o, body, belly, spineC, charged) {
   const now = performance.now();
-  const legA = Math.sin((o.walk || 0) * 2) * 6;
-  const stompDip = o.stompT > 0.55 ? 8 : 0;
+  const overdrive = (o.rage || 0) >= 100;
+  const w = (o.walk || 0) * 2;
+  const legA = Math.sin(w) * 6;
+  const moving = Math.abs(legA) > 1.5;
   const panel = shade(body, -25);
-  const glow = o.hurt ? "#ffdddd" : charged ? "#ffffff" : spineC;
+  const hull2 = shade(body, -12);
+  const darkM = shade(belly, -25);
+  const steel = "#c8ced8";
+  const pulse = 0.5 + Math.sin(now / (overdrive ? 90 : 420)) * 0.5;
+  const stompUp = o.stompT > 0.55 ? (o.stompT - 0.55) * 36 : 0;
+  const accent = charged ? "#ffffff" : spineC;
 
-  // segmented armored tail: overlapping plates ending in a thruster
-  ctx.fillStyle = panel;
-  for (let i = 0; i < 5; i++) {
-    const tx2 = -18 - i * 13, ty2 = -46 + i * 4;
-    ctx.save();
-    ctx.translate(tx2, ty2);
-    ctx.rotate(i * 0.12);
-    ctx.fillRect(-8, -7 + i, 16, 14 - i * 1.6);
-    ctx.restore();
-  }
-  // tail thruster flare while walking
-  if (Math.abs(legA) > 3) {
-    ctx.fillStyle = "rgba(255,120,80,0.6)";
+  // ============ SEGMENTED TAIL (counterweight, thruster tip) ============
+  for (let i = 5; i >= 0; i--) {
+    const sx = -12 - i * 10;
+    const sy = -47 + i * 1.4 + Math.sin(w - i * 0.6) * 1.6;
+    const h = 8.5 - i * 1.05;
+    ctx.fillStyle = i % 2 ? panel : hull2;
     ctx.beginPath();
-    ctx.moveTo(-78, -30); ctx.lineTo(-92 - Math.random() * 8, -26); ctx.lineTo(-78, -22);
+    ctx.moveTo(sx - 8, sy - h + 1); ctx.lineTo(sx + 6, sy - h);
+    ctx.lineTo(sx + 7, sy + h); ctx.lineTo(sx - 9, sy + h - 1);
     ctx.closePath(); ctx.fill();
   }
+  // thruster nozzle
+  ctx.fillStyle = darkM;
+  ctx.beginPath();
+  ctx.moveTo(-61, -43); ctx.lineTo(-69, -45); ctx.lineTo(-69, -35); ctx.lineTo(-61, -37);
+  ctx.closePath(); ctx.fill();
+  if (moving || overdrive) {
+    const fl = (overdrive ? 7 : 5) + Math.random() * 2;
+    ctx.globalAlpha = overdrive ? 0.8 : 0.5;
+    ctx.fillStyle = t.beam;
+    ctx.beginPath();
+    ctx.moveTo(-69, -44); ctx.lineTo(-69 - fl, -40); ctx.lineTo(-69, -36);
+    ctx.closePath(); ctx.fill();
+    if (overdrive) {
+      ctx.fillStyle = "#ffffff"; ctx.globalAlpha = 0.7;
+      ctx.beginPath();
+      ctx.moveTo(-69, -42); ctx.lineTo(-69 - fl * 0.5, -40); ctx.lineTo(-69, -38);
+      ctx.closePath(); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+  // tail seam lights ignite in overdrive
+  if (overdrive) {
+    ctx.fillStyle = accent;
+    for (let i = 0; i < 5; i++) ctx.fillRect(-16 - i * 10, -46 + i * 1.4, 2, 2);
+  }
 
-  // rear leg: piston strut (darker)
-  drawPistonLeg(-6 - legA * 0.5, stompDip, panel);
+  // ============ FAR LEG (darkest, drawn first) ============
+  mechLeg(-4, -legA * 1.4, Math.max(0, Math.cos(w)) * 3, shade(body, -32), true);
 
-  // torso: angular plated hull
-  const tg = ctx.createLinearGradient(-26, 0, 26, 0);
+  // ============ TORSO HULL (angular theropod chassis) ============
+  const tg = ctx.createLinearGradient(-24, 0, 30, 0);
   tg.addColorStop(0, shade(body, -30));
-  tg.addColorStop(0.5, body);
-  tg.addColorStop(1, shade(body, 20));
+  tg.addColorStop(0.55, body);
+  tg.addColorStop(1, shade(body, 18));
   ctx.fillStyle = tg;
   ctx.beginPath();
-  ctx.moveTo(-22, -42);
-  ctx.lineTo(-26, -74);
-  ctx.lineTo(-14, -102);
-  ctx.lineTo(12, -108);
-  ctx.lineTo(26, -88);
-  ctx.lineTo(22, -54);
-  ctx.lineTo(6, -40);
+  ctx.moveTo(-16, -44);
+  ctx.lineTo(-24, -76);
+  ctx.lineTo(-10, -99);
+  ctx.lineTo(12, -106);
+  ctx.lineTo(29, -94);
+  ctx.lineTo(27, -66);
+  ctx.lineTo(10, -42);
   ctx.closePath(); ctx.fill();
-  // hull panel seams + rivets
+  // panel seams
   ctx.strokeStyle = "rgba(10,14,24,0.55)"; ctx.lineWidth = 1.5;
   ctx.beginPath();
-  ctx.moveTo(-18, -60); ctx.lineTo(18, -64);
-  ctx.moveTo(-20, -80); ctx.lineTo(20, -84);
-  ctx.moveTo(-2, -42); ctx.lineTo(-6, -104);
+  ctx.moveTo(-16, -52); ctx.lineTo(-21, -74);
+  ctx.moveTo(-13, -95); ctx.lineTo(6, -101);
+  ctx.moveTo(2, -44); ctx.lineTo(-4, -97);
   ctx.stroke(); ctx.lineWidth = 1;
+  // rivets
   ctx.fillStyle = "rgba(220,230,240,0.35)";
-  for (const [rx, ry] of [[-16, -56], [12, -58], [-14, -76], [14, -80], [-8, -98], [8, -100]])
-    ctx.fillRect(rx, ry, 2, 2);
-  // chest reactor core: pulsing ring
-  const pulse = 0.6 + Math.sin(now / (charged ? 90 : 300)) * 0.4;
-  ctx.fillStyle = "#1a2030";
-  ctx.beginPath(); ctx.arc(8, -74, 10, 0, 7); ctx.fill();
-  ctx.strokeStyle = glow; ctx.lineWidth = 2.5;
-  ctx.globalAlpha = 0.5 + pulse * 0.5;
-  ctx.beginPath(); ctx.arc(8, -74, 7, 0, 7); ctx.stroke();
-  ctx.globalAlpha = 1; ctx.lineWidth = 1;
-  ctx.fillStyle = glow;
-  ctx.beginPath(); ctx.arc(8, -74, 3 + pulse * 1.5, 0, 7); ctx.fill();
-  // vent grilles on the flank
-  ctx.fillStyle = "#232838";
-  for (let i = 0; i < 3; i++) ctx.fillRect(-20, -68 + i * 7, 10, 3);
-
-  // dorsal fin array: angular blades with warning lights
-  ctx.fillStyle = charged ? "#ffffff" : panel;
-  const fins = [[-16, -88, 12], [-6, -100, 15], [6, -104, 11]];
-  for (const [fx3, fy3, fs] of fins) {
+  for (const r of [[-18, -60], [-13, -90], [-1, -100], [8, -102], [-3, -48], [24, -88]])
+    ctx.fillRect(r[0], r[1], 2, 2);
+  // overdrive: seam lights ignite along the panel lines
+  if (overdrive) {
+    ctx.strokeStyle = charged ? "rgba(255,255,255,0.9)" : "rgba(255,51,85,0.75)";
+    ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.moveTo(fx3 - fs * 0.5, fy3 + 3);
-    ctx.lineTo(fx3 - fs * 0.1, fy3 - fs);
-    ctx.lineTo(fx3 + fs * 0.45, fy3 + 2);
-    ctx.closePath(); ctx.fill();
-    ctx.fillStyle = Math.floor(now / 400 + fx3) % 2 ? "#ff3355" : "#701525";
-    ctx.fillRect(fx3 - 1.5, fy3 - fs * 0.7, 3, 3);
-    ctx.fillStyle = charged ? "#ffffff" : panel;
+    ctx.moveTo(-16, -52); ctx.lineTo(-21, -74);
+    ctx.moveTo(-13, -95); ctx.lineTo(6, -101);
+    ctx.moveTo(2, -44); ctx.lineTo(-4, -97);
+    ctx.stroke(); ctx.lineWidth = 1;
+  }
+  // flank vent grilles: dark at idle, flaring crimson exhaust in overdrive
+  for (let i = 0; i < 3; i++) {
+    ctx.fillStyle = darkM;
+    ctx.fillRect(-19, -88 + i * 7, 11, 4);
+    if (overdrive) {
+      ctx.globalAlpha = 0.55 + Math.random() * 0.45;
+      ctx.fillStyle = t.beam;
+      ctx.fillRect(-19, -87 + i * 7, 11, 2);
+      ctx.globalAlpha = 1;
+    }
+  }
+  if (overdrive) {
+    ctx.globalAlpha = 0.35; ctx.fillStyle = t.beam;
+    ctx.beginPath();
+    for (let i = 0; i < 3; i++) {
+      const vy = -86 + i * 7, vl = 6 + Math.random() * 6;
+      ctx.moveTo(-19, vy - 1.5); ctx.lineTo(-19 - vl, vy); ctx.lineTo(-19, vy + 1.5);
+    }
+    ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1;
   }
 
-  // front leg
-  drawPistonLeg(8 + legA * 0.5, 0, body);
+  // ============ RIBCAGE COWLING + REACTOR CORE ============
+  ctx.fillStyle = belly;
+  ctx.beginPath();
+  ctx.moveTo(6, -96); ctx.lineTo(26, -90); ctx.lineTo(29, -72);
+  ctx.lineTo(22, -52); ctx.lineTo(8, -46); ctx.lineTo(2, -70);
+  ctx.closePath(); ctx.fill();
+  // core socket
+  ctx.fillStyle = shade(belly, -30);
+  ctx.beginPath(); ctx.arc(16, -72, 9.5, 0, 7); ctx.fill();
+  if (overdrive) {
+    // blazing halo + spinning tri-arc ring
+    const rg = ctx.createRadialGradient(16, -72, 2, 16, -72, 18);
+    rg.addColorStop(0, "rgba(255,68,102,0.55)");
+    rg.addColorStop(1, "rgba(255,68,102,0)");
+    ctx.fillStyle = rg;
+    ctx.fillRect(-2, -90, 36, 36);
+    const spin = now / 140;
+    ctx.strokeStyle = accent; ctx.lineWidth = 2.5; ctx.globalAlpha = 0.95;
+    for (let i = 0; i < 3; i++) {
+      ctx.beginPath();
+      ctx.arc(16, -72, 7.5, spin + i * 2.09, spin + i * 2.09 + 1.25);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1; ctx.lineWidth = 1;
+    ctx.fillStyle = accent;
+    ctx.beginPath(); ctx.arc(16, -72, 3.2 + pulse * 2, 0, 7); ctx.fill();
+  } else {
+    // idle: dim slow heartbeat
+    ctx.strokeStyle = spineC; ctx.globalAlpha = 0.2 + pulse * 0.2; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(16, -72, 7.5, 0, 7); ctx.stroke();
+    ctx.fillStyle = spineC; ctx.globalAlpha = 0.3 + pulse * 0.25;
+    ctx.beginPath(); ctx.arc(16, -72, 2.5, 0, 7); ctx.fill();
+    ctx.globalAlpha = 1; ctx.lineWidth = 1;
+  }
+  // rib bars in front of the core — reactor sits housed behind them
+  ctx.strokeStyle = shade(belly, 24); ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(4, -90); ctx.quadraticCurveTo(20, -93, 27, -85);
+  ctx.moveTo(3, -79); ctx.quadraticCurveTo(7, -82, 11, -81);
+  ctx.moveTo(2, -62); ctx.quadraticCurveTo(16, -57, 25, -60);
+  ctx.stroke(); ctx.lineWidth = 1;
 
-  // arm: servo shoulder + hydraulic forearm with claw manipulators
+  // far arm: dark forearm peeking past the belly (depth cue)
+  ctx.fillStyle = shade(body, -42);
+  ctx.fillRect(11, -62, 6, 12);
+  ctx.beginPath();
+  ctx.moveTo(11, -52); ctx.lineTo(25, -48); ctx.lineTo(24, -42); ctx.lineTo(10, -46);
+  ctx.closePath(); ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(24, -48); ctx.lineTo(31, -44); ctx.lineTo(23, -42);
+  ctx.closePath(); ctx.fill();
+
+  // ============ DOUBLE ROW OF DORSAL BLADE FINS (Gorgonax echo) ============
+  const finRow = [[10, -104, 16], [-3, -101, 18], [-16, -92, 14], [-28, -78, 11], [-40, -57, 8], [-51, -50, 6]];
+  ctx.fillStyle = shade(body, -38);      // far row: smaller, darker, offset
+  ctx.beginPath();
+  for (const f of finRow) {
+    const x = f[0] - 5, y = f[1] + 2, s = f[2] * 0.72;
+    ctx.moveTo(x - 6, y + 2); ctx.lineTo(x - 2, y - s); ctx.lineTo(x + 5, y + 2);
+  }
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = panel;                 // near row: swept blade fins
+  ctx.beginPath();
+  for (const f of finRow) {
+    ctx.moveTo(f[0] - 7, f[1] + 3); ctx.lineTo(f[0] - 2, f[1] - f[2]); ctx.lineTo(f[0] + 7, f[1] + 2);
+  }
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = "rgba(200,206,216,0.5)";  // machined leading edges
+  ctx.beginPath();
+  for (const f of finRow) { ctx.moveTo(f[0] + 7, f[1] + 2); ctx.lineTo(f[0] - 2, f[1] - f[2]); }
+  ctx.stroke();
+  if (overdrive) {
+    // blades IGNITE: crimson plasma cores
+    ctx.fillStyle = charged ? "#ffffff" : t.beam;
+    ctx.globalAlpha = 0.85;
+    ctx.beginPath();
+    for (const f of finRow) {
+      ctx.moveTo(f[0] - 4, f[1]); ctx.lineTo(f[0] - 2, f[1] - f[2] + 3); ctx.lineTo(f[0] + 3, f[1]);
+    }
+    ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1;
+  } else {
+    // running lights only: dim status pips at blade roots
+    ctx.fillStyle = "rgba(255,51,85,0.4)";
+    for (const f of finRow) ctx.fillRect(f[0] - 1, f[1] - 3, 2, 2);
+  }
+
+  // ============ NEAR LEG (stomp raises it, piston compresses) ============
+  mechLeg(6, legA * 1.4, Math.max(0, -Math.cos(w)) * 3 + stompUp, body, false);
+
+  // ============ ARM (servo shoulder, hydraulic forearm, tri-claw) ============
   let armAng = 0.5;
   if (o.swipeT > 0) {
     if (o.swipeKind === 2)      armAng = 0.9 - (0.42 - o.swipeT) * 7.5;
@@ -11149,7 +11265,7 @@ function drawMekagoraBody(t, o, body, belly, spineC, charged) {
     else                        armAng = -1.4 + (0.38 - o.swipeT) * 7;
   }
   if (o.swipeT > 0.1 && o.swipeKind !== 3) {
-    ctx.strokeStyle = "rgba(255,80,110,0.3)"; ctx.lineWidth = 3;
+    ctx.strokeStyle = "rgba(255,255,255,0.3)"; ctx.lineWidth = 3;
     ctx.beginPath(); ctx.arc(8, -92, 38, armAng - 0.6, armAng + 0.25); ctx.stroke();
     ctx.lineWidth = 1;
   }
@@ -11157,96 +11273,198 @@ function drawMekagoraBody(t, o, body, belly, spineC, charged) {
   ctx.translate(8, -92);
   ctx.rotate(armAng);
   ctx.fillStyle = body;
-  ctx.beginPath(); ctx.arc(0, 0, 8, 0, 7); ctx.fill();       // shoulder servo
+  ctx.fillRect(2, -5.5, 17, 11);                       // upper actuator
+  ctx.fillStyle = shade(body, 12);                     // angular pauldron
+  ctx.beginPath();
+  ctx.moveTo(-9, -7); ctx.lineTo(4, -10); ctx.lineTo(10, -2); ctx.lineTo(2, 8); ctx.lineTo(-8, 5);
+  ctx.closePath(); ctx.fill();
   ctx.strokeStyle = "rgba(10,14,24,0.5)";
-  ctx.beginPath(); ctx.arc(0, 0, 5, 0, 7); ctx.stroke();
-  ctx.fillRect(4, -5, 16, 10);                               // upper actuator
-  ctx.fillStyle = panel;
-  ctx.fillRect(18, -4, 16, 9);                               // forearm housing
-  ctx.strokeStyle = "#232838"; ctx.lineWidth = 2;             // hydraulic rod
-  ctx.beginPath(); ctx.moveTo(6, 4); ctx.lineTo(20, 6); ctx.stroke(); ctx.lineWidth = 1;
-  // tri-claw manipulator
-  ctx.fillStyle = "#c8ced8";
+  ctx.beginPath(); ctx.arc(0, 0, 4.5, 0, 7); ctx.stroke();
+  ctx.fillStyle = shade(body, -18);                    // elbow servo
+  ctx.beginPath(); ctx.arc(19, 1, 5, 0, 7); ctx.fill();
+  ctx.fillStyle = panel;                               // forearm housing
+  ctx.fillRect(20, -4.5, 16, 10);
+  ctx.strokeStyle = darkM; ctx.lineWidth = 3;          // hydraulic cylinder + rod
+  ctx.beginPath(); ctx.moveTo(4, 6); ctx.lineTo(14, 7.5); ctx.stroke();
+  ctx.strokeStyle = steel; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(14, 7.5); ctx.lineTo(21, 6); ctx.stroke();
+  ctx.lineWidth = 1;
+  ctx.fillStyle = overdrive ? accent : "rgba(255,51,85,0.35)";
+  ctx.fillRect(31, -3, 3, 2);                          // knuckle light
+  ctx.fillStyle = steel;                               // tri-claw manipulator
+  ctx.beginPath();
   for (let i = 0; i < 3; i++) {
-    ctx.beginPath();
-    ctx.moveTo(33, -4 + i * 4);
-    ctx.lineTo(42, -2 + i * 4);
-    ctx.lineTo(33, 0 + i * 4);
-    ctx.closePath(); ctx.fill();
+    ctx.moveTo(35, -5 + i * 4.5);
+    ctx.lineTo(45, -2.5 + i * 4.5);
+    ctx.lineTo(35, 0 + i * 4.5);
   }
+  ctx.closePath(); ctx.fill();
   ctx.restore();
 
-  // neck + head: armored wedge with a glowing visor
-  ctx.fillStyle = body;
-  ctx.beginPath();                                            // neck gimbal
-  ctx.moveTo(2, -102); ctx.lineTo(14, -114); ctx.lineTo(22, -104); ctx.lineTo(10, -96);
+  // ============ NECK + RAPTOR SENSOR HEAD ============
+  ctx.fillStyle = shade(body, -8);
+  ctx.beginPath();
+  ctx.moveTo(4, -98); ctx.lineTo(16, -104); ctx.lineTo(24, -118); ctx.lineTo(12, -116);
   ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = darkM; ctx.lineWidth = 2.5;        // neck hydraulic
+  ctx.beginPath(); ctx.moveTo(10, -99); ctx.lineTo(20, -112); ctx.stroke(); ctx.lineWidth = 1;
+  // skull wedge
   ctx.fillStyle = panel;
-  ctx.beginPath();                                            // angular skull
-  ctx.moveTo(12, -124);
-  ctx.lineTo(34, -122);
-  ctx.lineTo(46, -116);                                       // snout tip
-  ctx.lineTo(34, -110);
-  ctx.lineTo(14, -110);
+  ctx.beginPath();
+  ctx.moveTo(8, -128);
+  ctx.lineTo(24, -133);
+  ctx.lineTo(40, -128);
+  ctx.lineTo(52, -120);
+  ctx.lineTo(50, -116);
+  ctx.lineTo(26, -113);
+  ctx.lineTo(10, -116);
   ctx.closePath(); ctx.fill();
-  // jaw plate (hinges when firing)
-  const jawOpen = o.breathing ? 0.35 : 0.04;
+  ctx.strokeStyle = "rgba(10,14,24,0.55)";             // cheek plate seams
+  ctx.beginPath();
+  ctx.moveTo(22, -131); ctx.lineTo(26, -114);
+  ctx.moveTo(40, -127); ctx.lineTo(38, -117);
+  ctx.stroke();
+  ctx.strokeStyle = "rgba(210,218,228,0.4)";           // crown highlight
+  ctx.beginPath(); ctx.moveTo(24, -133); ctx.lineTo(40, -128); ctx.stroke();
+  // antenna horns (swept back, mirroring the mascot's horns)
+  ctx.strokeStyle = steel; ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(14, -128); ctx.lineTo(2, -138);
+  ctx.moveTo(20, -131); ctx.lineTo(11, -140);
+  ctx.stroke(); ctx.lineWidth = 1;
+  ctx.fillStyle = overdrive ? accent :
+    (Math.floor(now / 700) % 2 ? "rgba(255,51,85,0.8)" : "rgba(255,51,85,0.25)");
+  ctx.fillRect(0, -140, 3, 3);
+  ctx.fillRect(9.5, -142, 3, 3);
+  // upper teeth
+  ctx.fillStyle = steel;
+  ctx.beginPath();
+  for (let i = 0; i < 3; i++) {
+    ctx.moveTo(31 + i * 6, -114); ctx.lineTo(33 + i * 6, -110.5); ctx.lineTo(35 + i * 6, -114);
+  }
+  ctx.closePath(); ctx.fill();
+  // hinged jaw (drops open when the lance fires)
+  const jawOpen = o.breathing ? 0.38 : 0.05;
   ctx.save();
-  ctx.translate(32, -110);
+  ctx.translate(26, -114);
   ctx.rotate(jawOpen);
   ctx.fillStyle = shade(body, -35);
-  ctx.beginPath(); ctx.moveTo(-2, 0); ctx.lineTo(13, 1); ctx.lineTo(11, 5); ctx.lineTo(-2, 4); ctx.closePath(); ctx.fill();
-  ctx.fillStyle = "#c8ced8";                                  // metal teeth
-  for (let i = 0; i < 3; i++) {
-    ctx.beginPath();
-    ctx.moveTo(1 + i * 4, 1); ctx.lineTo(2.5 + i * 4, -1.5); ctx.lineTo(4 + i * 4, 1);
-    ctx.closePath(); ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(-3, 0); ctx.lineTo(22, 1); ctx.lineTo(19, 6); ctx.lineTo(-3, 5);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = steel;
+  ctx.beginPath();
+  for (let i = 0; i < 4; i++) {
+    ctx.moveTo(3 + i * 4.5, 1); ctx.lineTo(4.8 + i * 4.5, -2); ctx.lineTo(6.5 + i * 4.5, 1);
   }
+  ctx.closePath(); ctx.fill();
+  if (overdrive) { ctx.fillStyle = accent; ctx.fillRect(0, 3, 17, 1.2); }
   ctx.restore();
-  // visor eye: sweeping scanner band
-  ctx.fillStyle = "#141824";
-  ctx.fillRect(18, -121, 18, 5);
-  const scan = 18 + ((now / 12) % 16);
-  ctx.fillStyle = o.breathing ? t.beam : glow;
-  ctx.fillRect(scan, -121, 3.5, 5);
-  // muzzle glow when firing
-  if (o.breathing) {
-    ctx.fillStyle = t.beam;
-    ctx.beginPath(); ctx.arc(48, -114, 4 + Math.random() * 2, 0, 7); ctx.fill();
+  // cyclops sensor lens
+  ctx.fillStyle = shade(belly, -30);
+  ctx.beginPath(); ctx.arc(34, -123, 5, 0, 7); ctx.fill();
+  const eyeC = o.breathing ? t.beam : overdrive ? accent : spineC;
+  ctx.fillStyle = eyeC;
+  ctx.globalAlpha = (o.breathing || overdrive) ? 1 : 0.45 + pulse * 0.2;
+  ctx.beginPath(); ctx.arc(34, -123, (o.breathing || overdrive) ? 3.4 : 2.4, 0, 7); ctx.fill();
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = "rgba(255,255,255,0.85)";
+  ctx.fillRect(35, -125, 1.5, 1.5);
+  if (overdrive) {
+    ctx.strokeStyle = eyeC; ctx.globalAlpha = 0.6;
+    ctx.beginPath(); ctx.arc(34, -123, 6.5, 0, 7); ctx.stroke();
+    ctx.globalAlpha = 1;
   }
-  // antenna
-  ctx.strokeStyle = "#c8ced8"; ctx.lineWidth = 1.5;
-  ctx.beginPath(); ctx.moveTo(16, -124); ctx.lineTo(12, -134); ctx.stroke(); ctx.lineWidth = 1;
-  if (Math.floor(now / 500) % 2) { ctx.fillStyle = "#ff3355"; ctx.fillRect(10.5, -137, 3, 3); }
 
-  function drawPistonLeg(hipX, dip, color) {
-    // thigh block → knee servo → shin strut → splayed stabilizer foot
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.moveTo(hipX - 8, -48);
-    ctx.lineTo(hipX + 9, -44);
-    ctx.lineTo(hipX + 7, -24 + dip);
-    ctx.lineTo(hipX - 6, -26 + dip);
+  // ============ PLASMA LANCE charging in the maw ============
+  if (o.breathing) {
+    const flk = 0.7 + Math.random() * 0.3;
+    ctx.fillStyle = t.beam; ctx.globalAlpha = flk;
+    ctx.beginPath();                                   // twin emitter cores
+    ctx.moveTo(49, -119); ctx.arc(46, -119, 3, 0, 7);
+    ctx.moveTo(47, -107); ctx.arc(44, -107, 3, 0, 7);
+    ctx.fill();
+    ctx.beginPath();                                   // converging charge wedge
+    ctx.moveTo(46, -122); ctx.lineTo(57, -114); ctx.lineTo(43, -104);
     ctx.closePath(); ctx.fill();
-    ctx.strokeStyle = "#232838"; ctx.lineWidth = 3;             // exposed piston
-    ctx.beginPath(); ctx.moveTo(hipX + 4, -40); ctx.lineTo(hipX + 2, -22 + dip); ctx.stroke();
-    ctx.lineWidth = 1;
-    ctx.fillStyle = shade(color, -15);
-    ctx.beginPath(); ctx.arc(hipX, -24 + dip, 6, 0, 7); ctx.fill();  // knee servo
-    ctx.fillStyle = color;
-    ctx.fillRect(hipX - 4, -24 + dip, 9, 22);                   // shin strut
-    // stabilizer foot with toe claws
-    ctx.fillStyle = shade(color, -20);
+    ctx.fillStyle = "#ffffff"; ctx.globalAlpha = flk * 0.8;
+    ctx.beginPath(); ctx.arc(53, -113, 2.5 + Math.random() * 1.5, 0, 7); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  // ============ DAMAGE: arcing sparks ============
+  if (o.hurt) {
+    ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.moveTo(hipX - 10, dip); ctx.lineTo(hipX - 2, -6 + dip);
-    ctx.lineTo(hipX + 8, -6 + dip); ctx.lineTo(hipX + 16, dip);
+    for (let i = 0; i < 3; i++) {
+      const sx = -20 + Math.random() * 45, sy = -100 + Math.random() * 55;
+      ctx.moveTo(sx, sy);
+      ctx.lineTo(sx + 4 - Math.random() * 8, sy - 3 - Math.random() * 4);
+      ctx.lineTo(sx + 8 - Math.random() * 16, sy + 2);
+    }
+    ctx.stroke(); ctx.lineWidth = 1;
+  }
+
+  // ---- digitigrade piston leg: hip > knee(fwd) > ankle(back) > talon foot ----
+  function mechLeg(hx, sw, raise, col, far) {
+    const kx = hx + 9 + sw * 0.45, ky = -31 - raise * 0.5;   // knee
+    const ax = hx - 1 + sw, ay = -14 - raise;                // ankle
+    const fy = -raise;                                       // sole
+    const dk = shade(col, -22);
+    // thigh
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    ctx.moveTo(hx - 8, -56); ctx.lineTo(hx + 8, -53);
+    ctx.lineTo(kx + 6, ky + 2); ctx.lineTo(kx - 6, ky + 6);
     ctx.closePath(); ctx.fill();
-    ctx.fillStyle = "#c8ced8";
-    ctx.fillRect(hipX - 11, -2 + dip, 5, 3); ctx.fillRect(hipX + 12, -2 + dip, 5, 3);
+    // hydraulic piston hip->knee: cylinder + bright rod, visibly strokes with the gait
+    const pax = hx - 5, pay = -48, pbx = kx - 2, pby = ky + 4;
+    ctx.strokeStyle = darkM; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(pax, pay);
+    ctx.lineTo(pax + (pbx - pax) * 0.55, pay + (pby - pay) * 0.55); ctx.stroke();
+    ctx.strokeStyle = steel; ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(pax + (pbx - pax) * 0.45, pay + (pby - pay) * 0.45);
+    ctx.lineTo(pbx, pby); ctx.stroke(); ctx.lineWidth = 1;
+    // knee servo
+    ctx.fillStyle = dk;
+    ctx.beginPath(); ctx.arc(kx, ky + 2, 5, 0, 7); ctx.fill();
+    // shin strut (angles down-back)
+    ctx.fillStyle = shade(col, -8);
+    ctx.beginPath();
+    ctx.moveTo(kx - 4, ky); ctx.lineTo(kx + 5, ky + 3);
+    ctx.lineTo(ax + 3, ay); ctx.lineTo(ax - 4, ay);
+    ctx.closePath(); ctx.fill();
+    // ankle + metatarsal
+    ctx.fillStyle = dk;
+    ctx.beginPath();
+    ctx.moveTo(ax - 4, ay); ctx.lineTo(ax + 3, ay);
+    ctx.lineTo(ax + 6, fy - 3); ctx.lineTo(ax - 5, fy - 3);
+    ctx.closePath(); ctx.fill();
+    // foot plate
+    ctx.fillStyle = shade(col, -15);
+    ctx.beginPath();
+    ctx.moveTo(ax - 7, fy - 5); ctx.lineTo(ax + 8, fy - 6);
+    ctx.lineTo(ax + 10, fy); ctx.lineTo(ax - 8, fy);
+    ctx.closePath(); ctx.fill();
+    // talons: two forward claws + heel spur
+    ctx.fillStyle = far ? shade(col, -2) : steel;
+    ctx.beginPath();
+    ctx.moveTo(ax + 8, fy - 5); ctx.lineTo(ax + 17, fy); ctx.lineTo(ax + 7, fy);
+    ctx.moveTo(ax + 2, fy - 5); ctx.lineTo(ax + 9, fy); ctx.lineTo(ax + 1, fy);
+    ctx.moveTo(ax - 8, fy - 4); ctx.lineTo(ax - 13, fy); ctx.lineTo(ax - 6, fy);
+    ctx.closePath(); ctx.fill();
+    // hip servo disc + hub light (near leg only, overlaps hull)
+    if (!far) {
+      ctx.fillStyle = dk;
+      ctx.beginPath(); ctx.arc(hx, -51, 6.5, 0, 7); ctx.fill();
+      ctx.strokeStyle = "rgba(230,238,246,0.4)";
+      ctx.beginPath(); ctx.arc(hx, -51, 3.5, 0, 7); ctx.stroke();
+      ctx.fillStyle = overdrive ? accent : "rgba(255,51,85,0.35)";
+      ctx.fillRect(hx - 1, -52, 2, 2);
+    }
   }
 }
-
-// simple hex shade helper
 function shade(hex, amt) {
   const n = parseInt(hex.slice(1), 16);
   const r = Math.max(0, Math.min(255, (n >> 16) + amt));
